@@ -56,5 +56,36 @@ class Settings(BaseSettings):
 
     cors_origins: list[str] = ["http://localhost:5173"]
 
+    # Token-based ERPNext auth for server-to-server User provisioning
+    # (Authorization: token <key>:<secret>). Separate from the cookie-based
+    # sid flow in erpnext_client.erpnext_login/erpnext_logout — never mix
+    # the two. This key is scoped to User writes per the API doc; never
+    # send it to the frontend, never log it.
+    erpnext_user_api_key: str = ""
+    erpnext_user_api_secret: str = ""
+
+    # Token-based ERPNext auth for the read-only Product Catalogue
+    # (Authorization: token <key>:<secret>). Deliberately a separate,
+    # read-only-scoped key from erpnext_user_api_key/secret above — the
+    # catalogue feature never creates/updates/deletes, so it must not be
+    # able to even if the ERPNext role permissions changed.
+    erpnext_catalogue_api_key: str = ""
+    erpnext_catalogue_api_secret: str = ""
+
+    # Where the "approve this new user" email goes.
+    admin_approval_email: str = "jaliapoojan@gmail.com"
+
+    approval_token_ttl_hours: int = 72
+    onboarding_token_ttl_hours: int = 168
+
+    # SQLite file holding the Portal users table — the only thing in this
+    # backend that needs to survive a restart (unlike the in-memory OTP/
+    # session stores in auth_service.py).
+    portal_db_path: str = "portal.db"
+
+    # Public base URL of this backend, used to build the approve/onboarding
+    # links embedded in emails.
+    backend_base_url: str = "http://localhost:8000"
+
 
 settings = Settings()
