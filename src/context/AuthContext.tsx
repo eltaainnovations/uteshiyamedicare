@@ -35,7 +35,9 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null)
 
-function getStoredToken(): string | null {
+// Exported so other API clients (e.g. productsApi.ts) can attach the same
+// bearer token without duplicating the storage-key lookup logic.
+export function getStoredToken(): string | null {
   return localStorage.getItem(TOKEN_STORAGE_KEY) ?? sessionStorage.getItem(TOKEN_STORAGE_KEY)
 }
 
