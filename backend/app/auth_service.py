@@ -85,7 +85,6 @@ async def authenticate_credentials(email: str, password: str) -> tuple[PortalUse
 
     role = portal_users.get_role(email)
     if role is None:
-        logger.warning("No portal role mapped for %r (known: %r)", email, list(portal_users.PORTAL_USERS))
         await erpnext_logout(erpnext_session.sid)  # don't leave an orphaned ERPNext session
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Account not provisioned for portal access")
 

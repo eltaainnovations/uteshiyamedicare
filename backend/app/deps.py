@@ -26,3 +26,10 @@ def get_current_user(
 
     record = touch_session(jti)
     return PortalUser(email=record.email, name=record.name, role=record.role), jti
+
+
+def require_admin(current: tuple[PortalUser, str] = Depends(get_current_user)) -> PortalUser:
+    user, _jti = current
+    if user.role != "admin":
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Admin access required")
+    return user

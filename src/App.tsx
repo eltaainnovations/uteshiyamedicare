@@ -1,6 +1,9 @@
 import { Navigate, Outlet, Route, Routes } from 'react-router-dom'
 import AdminDashboard from './components/admin/AdminDashboard'
 import AdminPortal from './components/admin/AdminPortal'
+import Distributors from './components/admin/Distributors'
+import ProductCatalogue from './components/admin/ProductCatalogue'
+import UserManagement from './components/admin/UserManagement'
 import Login from './components/auth/Login'
 import DashboardPlaceholder from './components/DashboardPlaceholder'
 import DistributorPortal from './components/distributor/DistributorPortal'
@@ -82,6 +85,12 @@ function AppRoutes() {
               element={
                 item.screen === 'admin-dashboard' ? (
                   <AdminDashboard />
+                ) : item.screen === 'product-catalogue' ? (
+                  <ProductCatalogue />
+                ) : item.screen === 'user-management' ? (
+                  <UserManagement />
+                ) : item.screen === 'distributors' ? (
+                  <Distributors />
                 ) : (
                   <Placeholder title={screenTitle[item.screen]} />
                 )
