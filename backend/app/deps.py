@@ -2,6 +2,7 @@ import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+from . import settings_service
 from .auth_service import PortalUser, touch_session
 from .config import settings
 
@@ -21,8 +22,14 @@ def get_current_user(
 
     jti = payload.get("jti")
     email = payload.get("sub")
-    if not jti or not email:
+    token_version = payload.get("tv")
+    if not jti or not email or token_version is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+
+    # Force Logout All Users bumps this — any token issued before the bump
+    # fails here immediately, regardless of its own exp/session state.
+    if token_version != settings_service.get_token_version():
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Session invalidated by administrator, please log in again")
 
     record = touch_session(jti)
     return PortalUser(email=record.email, name=record.name, role=record.role), jti
