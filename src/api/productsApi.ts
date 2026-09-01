@@ -109,11 +109,12 @@ async function request<T>(path: string): Promise<T> {
 }
 
 export async function fetchProducts(
-  params: { search?: string; category?: string; page?: number; pageSize?: number } = {},
+  params: { search?: string; category?: string; activeOnly?: boolean; page?: number; pageSize?: number } = {},
 ): Promise<ProductListPage> {
   const query = new URLSearchParams()
   if (params.search) query.set('search', params.search)
   if (params.category) query.set('category', params.category)
+  if (params.activeOnly) query.set('active_only', 'true')
   query.set('page', String(params.page ?? 1))
   query.set('page_size', String(params.pageSize ?? 20))
 

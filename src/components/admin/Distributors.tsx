@@ -7,14 +7,19 @@ import {
   type DistributorListItem,
 } from '../../api/distributorsApi'
 import { ApiError } from '../../types/auth'
+import Pagination from '../common/Pagination'
+
+const PAGE_SIZE = 20
 
 export default function Distributors() {
   const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
   const [customerGroup, setCustomerGroup] = useState('All')
   const [territory, setTerritory] = useState('All')
+  const [page, setPage] = useState(1)
 
   const [items, setItems] = useState<DistributorListItem[]>([])
+  const [total, setTotal] = useState(0)
   const [customerGroups, setCustomerGroups] = useState<string[]>([])
   const [territories, setTerritories] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
@@ -30,6 +35,11 @@ export default function Distributors() {
     return () => window.clearTimeout(t)
   }, [searchInput])
 
+  // Any filter change invalidates the current page number.
+  useEffect(() => {
+    setPage(1)
+  }, [search, customerGroup, territory])
+
   useEffect(() => {
     let cancelled = false
     setLoading(true)
@@ -38,10 +48,13 @@ export default function Distributors() {
       search: search || undefined,
       customerGroup: customerGroup === 'All' ? undefined : customerGroup,
       territory: territory === 'All' ? undefined : territory,
+      page,
+      pageSize: PAGE_SIZE,
     })
       .then((data) => {
         if (cancelled) return
         setItems(data.items)
+        setTotal(data.total)
         setCustomerGroups(data.customerGroups)
         setTerritories(data.territories)
       })
@@ -55,7 +68,9 @@ export default function Distributors() {
     return () => {
       cancelled = true
     }
-  }, [search, customerGroup, territory])
+  }, [search, customerGroup, territory, page])
+
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
   useEffect(() => {
     if (!selectedName) return
@@ -227,7 +242,7 @@ export default function Distributors() {
         <div>
           <h2 className="text-lg font-semibold text-gray-900 dark:text-[#E8EAF0]">Distributors</h2>
           <p className="text-xs text-gray-500 dark:text-[#8892A4] mt-0.5">
-            {loading ? 'Loading…' : `${items.length} distributor${items.length === 1 ? '' : 's'}`}
+            {loading ? 'Loading…' : `${total} distributor${total === 1 ? '' : 's'}`}
           </p>
         </div>
       </div>
@@ -338,6 +353,10 @@ export default function Distributors() {
             </table>
           </div>
         </div>
+      )}
+
+      {!error && !loading && total > 0 && (
+        <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
       )}
     </div>
   )

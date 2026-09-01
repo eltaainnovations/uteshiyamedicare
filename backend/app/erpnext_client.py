@@ -5,10 +5,11 @@ Three distinct auth modes live here, never mixed in a single call:
 - Token-based (erpnext_create_user/erpnext_update_user), via
   Authorization: token <key>:<secret>, for server-to-server User
   provisioning. Scoped to User writes per the ERPNext API doc.
-- Token-based, read-only (erpnext_get_list/erpnext_get_doc) for the
-  Product Catalogue. Uses its own catalogue-scoped key
-  (settings.erpnext_catalogue_api_key/secret) — never the User-write key
-  above, even though both are "Authorization: token" headers.
+- Token-based, read-only (erpnext_get_list/erpnext_get_doc/erpnext_get_count)
+  for Products and Distributors — catalogue-scoped key by default
+  (settings.erpnext_catalogue_api_key/secret). Orders passes
+  use_user_token=True to reuse the Users-scoped key instead (same key as
+  erpnext_create_user/erpnext_update_user above) — never both in one call.
 """
 
 import json
@@ -185,8 +186,11 @@ async def erpnext_get_list(
     limit_page_length: int | None = None,
     limit_start: int | None = None,
     group_by: str | None = None,
+    order_by: str | None = None,
+    use_user_token: bool = False,
 ) -> list[dict[str, Any]]:
-    """GET /api/resource/{doctype}, catalogue-scoped token, read-only.
+    """GET /api/resource/{doctype}, read-only. Catalogue-scoped token unless
+    use_user_token=True (Orders reuses the Users-scoped key).
 
     limit_page_length=0 means "fetch all" (ERPNext treats 0 as no limit) —
     pass it explicitly for internal aggregation reads (Bin, Item Price,
@@ -211,9 +215,12 @@ async def erpnext_get_list(
         params["limit_start"] = str(limit_start)
     if group_by is not None:
         params["group_by"] = group_by
+    if order_by is not None:
+        params["order_by"] = order_by
 
+    headers = _token_auth_header() if use_user_token else _catalogue_auth_header()
     try:
-        response = await _get_client().get(url, params=params, headers=_catalogue_auth_header())
+        response = await _get_client().get(url, params=params, headers=headers)
     except httpx.HTTPError as exc:
         logger.warning("ERPNext GET %s failed: %s", doctype, exc)
         raise ERPNextUnavailableError("Could not reach ERPNext") from exc
@@ -225,11 +232,42 @@ async def erpnext_get_list(
     return response.json().get("data", [])
 
 
-async def erpnext_get_doc(doctype: str, name: str) -> dict[str, Any]:
-    """GET /api/resource/{doctype}/{name}, catalogue-scoped token, read-only."""
-    url = f"{settings.erpnext_base_url}/api/resource/{quote(doctype, safe='')}/{quote(name, safe='')}"
+async def erpnext_get_count(doctype: str, *, filters: list[Any] | None = None, use_user_token: bool = False) -> int:
+    """GET /api/method/frappe.client.get_count, read-only. Catalogue-scoped
+    token unless use_user_token=True.
+
+    Unlike erpnext_get_list, this has no or_filters parameter — callers
+    that need an OR'd search term must fold it into a single `filters`
+    list (e.g. one "like" clause) so the exact same filters can be reused
+    for both the list call and this count, keeping them impossible to
+    disagree.
+    """
+    url = f"{settings.erpnext_base_url}/api/method/frappe.client.get_count"
+    params: dict[str, str] = {"doctype": doctype}
+    if filters is not None:
+        params["filters"] = json.dumps(filters)
+
+    headers = _token_auth_header() if use_user_token else _catalogue_auth_header()
     try:
-        response = await _get_client().get(url, headers=_catalogue_auth_header())
+        response = await _get_client().get(url, params=params, headers=headers)
+    except httpx.HTTPError as exc:
+        logger.warning("ERPNext get_count %s failed: %s", doctype, exc)
+        raise ERPNextUnavailableError("Could not reach ERPNext") from exc
+
+    if response.status_code != 200:
+        logger.warning("ERPNext get_count %s returned status %s: %s", doctype, response.status_code, response.text)
+        raise ERPNextUnavailableError(f"ERPNext returned status {response.status_code}")
+
+    return int(response.json().get("message", 0))
+
+
+async def erpnext_get_doc(doctype: str, name: str, *, use_user_token: bool = False) -> dict[str, Any]:
+    """GET /api/resource/{doctype}/{name}, read-only. Catalogue-scoped
+    token unless use_user_token=True."""
+    url = f"{settings.erpnext_base_url}/api/resource/{quote(doctype, safe='')}/{quote(name, safe='')}"
+    headers = _token_auth_header() if use_user_token else _catalogue_auth_header()
+    try:
+        response = await _get_client().get(url, headers=headers)
     except httpx.HTTPError as exc:
         logger.warning("ERPNext GET %s/%s failed: %s", doctype, name, exc)
         raise ERPNextUnavailableError("Could not reach ERPNext") from exc

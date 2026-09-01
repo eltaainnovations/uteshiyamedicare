@@ -1,8 +1,13 @@
 import { Navigate, Outlet, Route, Routes } from 'react-router-dom'
 import AdminDashboard from './components/admin/AdminDashboard'
 import AdminPortal from './components/admin/AdminPortal'
+import Analytics from './components/admin/Analytics'
 import Distributors from './components/admin/Distributors'
+import Orders from './components/admin/Orders'
 import ProductCatalogue from './components/admin/ProductCatalogue'
+import Profile from './components/admin/Profile'
+import Reports from './components/admin/Reports'
+import SettingsScreen from './components/admin/Settings'
 import UserManagement from './components/admin/UserManagement'
 import Login from './components/auth/Login'
 import DashboardPlaceholder from './components/DashboardPlaceholder'
@@ -91,12 +96,22 @@ function AppRoutes() {
                   <UserManagement />
                 ) : item.screen === 'distributors' ? (
                   <Distributors />
+                ) : item.screen === 'orders' ? (
+                  <Orders />
+                ) : item.screen === 'reports' ? (
+                  <Reports />
+                ) : item.screen === 'analytics' ? (
+                  <Analytics />
+                ) : item.screen === 'settings' ? (
+                  <SettingsScreen />
                 ) : (
                   <Placeholder title={screenTitle[item.screen]} />
                 )
               }
             />
           ))}
+          {/* Not in ADMIN_NAV_ITEMS — no sidebar entry, only reachable via the header's profile dropdown */}
+          <Route path="profile" element={<Profile />} />
           <Route path="*" element={<Navigate to="dashboard" replace />} />
         </Route>
       </Route>

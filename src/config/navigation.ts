@@ -27,6 +27,7 @@ export type Screen =
   | 'analytics'
   | 'erp-sync'
   | 'settings'
+  | 'profile'
   | 'dist-dashboard'
   | 'dist-products'
   | 'dist-active-orders'
@@ -56,6 +57,7 @@ export const screenTitle: Record<Screen, string> = {
   analytics: 'Analytics',
   'erp-sync': 'ERP Sync',
   settings: 'Settings',
+  profile: 'Profile',
   'dist-dashboard': 'Dashboard',
   'dist-products': 'Product Catalogue',
   'dist-active-orders': 'Active Orders',
