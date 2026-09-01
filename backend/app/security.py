@@ -8,6 +8,7 @@ import jwt
 from cryptography.fernet import Fernet
 
 from .config import settings
+from .schemas import SecurityConfig
 
 
 def hash_password(plain: str) -> str:
@@ -29,18 +30,35 @@ def generate_token_id() -> str:
     return secrets.token_urlsafe(16)
 
 
-def create_access_token(*, subject: str, role: str, jti: str) -> tuple[str, int]:
+def create_access_token(*, subject: str, role: str, jti: str, token_version: int) -> tuple[str, int]:
     now = datetime.now(timezone.utc)
     hard_ceiling = timedelta(minutes=settings.token_hard_ceiling_minutes)
     payload = {
         "sub": subject,
         "role": role,
         "jti": jti,
+        "tv": token_version,
         "iat": now,
         "exp": now + hard_ceiling,
     }
     token = jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
     return token, int(hard_ceiling.total_seconds())
+
+
+def check_password_policy(password: str, policy: SecurityConfig) -> list[str]:
+    """Local policy check ahead of the ERPNext password write — see
+    users_service.set_password_via_onboarding, the only place a password is
+    actually set today."""
+    violations = []
+    if len(password) < policy.min_password_length:
+        violations.append(f"Password must be at least {policy.min_password_length} characters long.")
+    if policy.require_uppercase and not any(c.isupper() for c in password):
+        violations.append("Password must include an uppercase letter.")
+    if policy.require_number and not any(c.isdigit() for c in password):
+        violations.append("Password must include a number.")
+    if policy.require_special_char and password.isalnum():
+        violations.append("Password must include a special character.")
+    return violations
 
 
 @lru_cache(maxsize=1)

@@ -1,5 +1,4 @@
 import {
-  AlertCircle,
   Bell,
   ChevronDown,
   LogOut,
@@ -13,19 +12,26 @@ import {
   Sun,
   UserCircle,
   X,
-  Zap,
   type LucideIcon,
 } from 'lucide-react'
 import { useState } from 'react'
-import { NavLink, Outlet, useLocation } from 'react-router-dom'
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import logoSrc from '@/assets/uteshiyamedicare.png'
 import type { NavBadges } from '../../hooks/useNavBadges'
 import { useNotifications } from '../../hooks/useNotifications'
+import { useAuth } from '../../context/AuthContext'
 import { useCart } from '../../context/CartContext'
 import { useTheme } from '../../context/ThemeContext'
 import type { NavItem, Screen } from '../../config/navigation'
 import { screenTitle } from '../../config/navigation'
 import CartDrawer from '../distributor/CartDrawer'
+
+function initialsFromName(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean)
+  if (parts.length === 0) return '?'
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+}
 
 interface LayoutProps {
   role: 'admin' | 'distributor'
@@ -35,11 +41,9 @@ interface LayoutProps {
   onLogout: () => void
 }
 
-const PROFILE_MENU: { icon: LucideIcon; label: string }[] = [
-  { icon: UserCircle, label: 'View Profile' },
-  { icon: Settings, label: 'Settings' },
-  { icon: Zap, label: "What's New" },
-  { icon: AlertCircle, label: 'Help & Support' },
+const PROFILE_MENU: { icon: LucideIcon; label: string; path: string }[] = [
+  { icon: UserCircle, label: 'View Profile', path: 'profile' },
+  { icon: Settings, label: 'Settings', path: 'settings' },
 ]
 
 export default function Layout({ role, navItems, badges, basePath, onLogout }: LayoutProps) {
@@ -48,8 +52,13 @@ export default function Layout({ role, navItems, badges, basePath, onLogout }: L
   const [profileOpen, setProfileOpen] = useState(false)
   const { isDark, toggle: toggleTheme } = useTheme()
   const { count: cartCount, openCart } = useCart()
+  const { user } = useAuth()
   const notifications = useNotifications()
   const location = useLocation()
+  const navigate = useNavigate()
+
+  const displayName = user?.name ?? (role === 'admin' ? 'Admin' : 'Distributor')
+  const initials = initialsFromName(displayName)
 
   const activeItem = navItems.find((item) => location.pathname === `${basePath}/${item.path}`)
   const currentTitle: string = activeItem ? screenTitle[activeItem.screen as Screen] : ''
@@ -137,15 +146,11 @@ export default function Layout({ role, navItems, badges, basePath, onLogout }: L
       <div className="p-3 border-t border-gray-100 dark:border-[#252836]">
         <div className="flex items-center gap-3 px-3 py-2 rounded-[8px]">
           <div className="w-8 h-8 rounded-full bg-[#147BA6] text-white text-xs font-bold flex items-center justify-center">
-            {role === 'admin' ? 'SA' : 'RP'}
+            {initials}
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-xs font-semibold text-gray-900 dark:text-[#E8EAF0] truncate">
-              {role === 'admin' ? 'Super Admin' : 'Rajesh Patel'}
-            </p>
-            <p className="text-[10px] text-gray-400 dark:text-[#5A6075] truncate">
-              {role === 'admin' ? 'admin@uteshiya.com' : 'rajesh@apexmed.in'}
-            </p>
+            <p className="text-xs font-semibold text-gray-900 dark:text-[#E8EAF0] truncate">{displayName}</p>
+            <p className="text-[10px] text-gray-400 dark:text-[#5A6075] truncate">{user?.email ?? ''}</p>
           </div>
         </div>
         <button
@@ -268,18 +273,22 @@ export default function Layout({ role, navItems, badges, basePath, onLogout }: L
             className="flex items-center gap-2 pl-2 pr-1 py-1 rounded-[8px] hover:bg-gray-100 dark:hover:bg-[#1F2233] transition"
           >
             <div className="w-7 h-7 rounded-full bg-[#147BA6] text-white text-xs font-bold flex items-center justify-center">
-              {role === 'admin' ? 'SA' : 'RP'}
+              {initials}
             </div>
             <span className="hidden md:block text-xs font-medium text-gray-700 dark:text-[#B0BAD0]">
-              {role === 'admin' ? 'Super Admin' : 'Rajesh Patel'}
+              {displayName}
             </span>
             <ChevronDown size={13} className="text-gray-400 dark:text-[#5A6075]" />
           </button>
           {profileOpen && (
             <div className="absolute right-0 top-full mt-2 w-48 bg-white dark:bg-[#1A1D2E] rounded-[12px] shadow-xl border border-gray-100 dark:border-[#252836] z-50 py-1">
-              {PROFILE_MENU.map(({ icon: Icon, label }) => (
+              {PROFILE_MENU.map(({ icon: Icon, label, path }) => (
                 <button
                   key={label}
+                  onClick={() => {
+                    setProfileOpen(false)
+                    navigate(`${basePath}/${path}`)
+                  }}
                   className="w-full flex items-center gap-2.5 px-4 py-2 text-xs text-gray-700 dark:text-[#B0BAD0] hover:bg-gray-50 dark:hover:bg-[#1F2233] transition"
                 >
                   <Icon size={14} className="text-gray-400 dark:text-[#5A6075]" />

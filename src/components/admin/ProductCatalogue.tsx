@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, Filter, Grid, List, Package, Search } from 'lucide-react'
+import { ChevronRight, Filter, Grid, List, Package, Search } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import {
   fetchProductDetail,
@@ -8,28 +8,12 @@ import {
   type ProductVariant,
 } from '../../api/productsApi'
 import { ApiError } from '../../types/auth'
+import Pagination from '../common/Pagination'
 
 type ViewMode = 'grid' | 'list'
 type DetailTab = 'Description' | 'Specifications' | 'Variants Table'
 const ALL_DETAIL_TABS: DetailTab[] = ['Description', 'Specifications', 'Variants Table']
 const PAGE_SIZE_OPTIONS = [20, 50, 100, 200] as const
-
-/** Windowed page numbers with "…" gaps — e.g. [1, '…', 4, 5, 6, '…', 42]. */
-function buildPageWindow(current: number, totalPages: number): (number | '…')[] {
-  if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i + 1)
-
-  const pages = new Set<number>([1, totalPages, current, current - 1, current + 1])
-  const sorted = Array.from(pages)
-    .filter((p) => p >= 1 && p <= totalPages)
-    .sort((a, b) => a - b)
-
-  const result: (number | '…')[] = []
-  for (let i = 0; i < sorted.length; i++) {
-    if (i > 0 && sorted[i] - sorted[i - 1] > 1) result.push('…')
-    result.push(sorted[i])
-  }
-  return result
-}
 
 function formatFullInr(amount: number): string {
   return `₹${amount.toLocaleString('en-IN')}`
@@ -585,49 +569,7 @@ export default function ProductCatalogue() {
       )}
 
       {!error && !loading && total > 0 && (
-        <div className="flex items-center justify-between flex-wrap gap-3">
-          <span className="text-xs text-gray-500 dark:text-[#8892A4]">
-            Page {page} of {totalPages}
-          </span>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              disabled={page === 1}
-              className="w-8 h-8 flex items-center justify-center rounded-[6px] text-gray-500 dark:text-[#8892A4] hover:bg-gray-100 dark:hover:bg-[#1F2233] disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent transition"
-            >
-              <ChevronLeft size={15} />
-            </button>
-            {buildPageWindow(page, totalPages).map((p, i) =>
-              p === '…' ? (
-                <span
-                  key={`ellipsis-${i}`}
-                  className="w-8 h-8 flex items-center justify-center text-xs text-gray-400 dark:text-[#5A6075]"
-                >
-                  …
-                </span>
-              ) : (
-                <button
-                  key={p}
-                  onClick={() => setPage(p)}
-                  className={`w-8 h-8 text-xs rounded-[6px] transition ${
-                    p === page
-                      ? 'bg-[#147BA6] text-white'
-                      : 'text-gray-600 dark:text-[#8892A4] hover:bg-gray-100 dark:hover:bg-[#1F2233]'
-                  }`}
-                >
-                  {p}
-                </button>
-              ),
-            )}
-            <button
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              disabled={page === totalPages}
-              className="w-8 h-8 flex items-center justify-center rounded-[6px] text-gray-500 dark:text-[#8892A4] hover:bg-gray-100 dark:hover:bg-[#1F2233] disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent transition"
-            >
-              <ChevronRight size={15} />
-            </button>
-          </div>
-        </div>
+        <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
       )}
     </div>
   )

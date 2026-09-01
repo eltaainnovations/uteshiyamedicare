@@ -13,6 +13,9 @@ export interface DistributorListItem {
 
 export interface DistributorListPage {
   items: DistributorListItem[]
+  total: number
+  page: number
+  pageSize: number
   customerGroups: string[]
   territories: string[]
 }
@@ -60,6 +63,9 @@ interface DistributorListItemBody {
 
 interface DistributorListResponseBody {
   items: DistributorListItemBody[]
+  total: number
+  page: number
+  page_size: number
   customer_groups: string[]
   territories: string[]
 }
@@ -119,12 +125,20 @@ async function request<T>(path: string): Promise<T> {
 }
 
 export async function fetchDistributors(
-  params: { search?: string; customerGroup?: string; territory?: string } = {},
+  params: {
+    search?: string
+    customerGroup?: string
+    territory?: string
+    page?: number
+    pageSize?: number
+  } = {},
 ): Promise<DistributorListPage> {
   const query = new URLSearchParams()
   if (params.search) query.set('search', params.search)
   if (params.customerGroup) query.set('customer_group', params.customerGroup)
   if (params.territory) query.set('territory', params.territory)
+  query.set('page', String(params.page ?? 1))
+  query.set('page_size', String(params.pageSize ?? 20))
 
   const body = await request<DistributorListResponseBody>(`/distributors?${query.toString()}`)
   return {
@@ -135,6 +149,9 @@ export async function fetchDistributors(
       territory: d.territory,
       disabled: d.disabled,
     })),
+    total: body.total,
+    page: body.page,
+    pageSize: body.page_size,
     customerGroups: body.customer_groups,
     territories: body.territories,
   }

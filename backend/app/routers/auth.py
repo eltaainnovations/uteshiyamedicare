@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends
 
-from .. import auth_service
+from .. import auth_service, users_service
 from ..auth_service import PortalUser
 from ..config import settings
 from ..deps import get_current_user
@@ -8,6 +8,7 @@ from ..schemas import (
     LoginChallengeResponse,
     LoginRequest,
     MessageResponse,
+    PasswordResetRequest,
     SessionResponse,
     TokenResponse,
     UserOut,
@@ -51,3 +52,11 @@ async def logout(current: tuple[PortalUser, str] = Depends(get_current_user)) ->
     _user, jti = current
     await auth_service.revoke_session(jti)
     return MessageResponse(detail="Logged out")
+
+
+@router.post("/request-password-reset", response_model=MessageResponse)
+async def request_password_reset(payload: PasswordResetRequest) -> MessageResponse:
+    # Generic response regardless of outcome — never confirms whether an
+    # email is a registered/active Portal account.
+    await users_service.request_password_reset(payload.email)
+    return MessageResponse(detail="If that email is registered, a password reset link has been sent.")

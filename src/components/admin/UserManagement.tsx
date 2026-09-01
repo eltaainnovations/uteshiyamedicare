@@ -1,5 +1,6 @@
 import { AlertCircle, Ban, CheckCircle, Clock, Plus, Search, X } from 'lucide-react'
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import {
   createPortalUser,
   disablePortalUser,
@@ -58,6 +59,9 @@ const EMPTY_FORM: CreateFormState = {
 }
 
 export default function UserManagement() {
+  const location = useLocation()
+  const navigate = useNavigate()
+
   const [users, setUsers] = useState<PortalUser[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -94,6 +98,17 @@ export default function UserManagement() {
       cancelled = true
     }
   }, [])
+
+  // Opened via a "Create User" navigation shortcut (e.g. from the Admin
+  // Dashboard) with { openAddUserModal: true } in router state. Clear the
+  // state immediately after so back/forward or a refresh doesn't reopen it.
+  useEffect(() => {
+    if ((location.state as { openAddUserModal?: boolean } | null)?.openAddUserModal) {
+      openModal()
+      navigate(location.pathname, { replace: true, state: {} })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state])
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()

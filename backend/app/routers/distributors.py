@@ -14,16 +14,21 @@ async def list_distributors(
     search: str | None = Query(default=None, description="Matches customer_name"),
     customer_group: str | None = Query(default=None),
     territory: str | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=200),
     _admin: PortalUser = Depends(require_admin),
 ) -> DistributorListResponse:
     try:
-        rows, groups, territories = await distributors_service.list_distributors(
-            search=search, customer_group=customer_group, territory=territory
+        rows, total, groups, territories = await distributors_service.list_distributors(
+            search=search, customer_group=customer_group, territory=territory, page=page, page_size=page_size
         )
     except ERPNextUnavailableError as exc:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
     return DistributorListResponse(
         items=[DistributorListItem(**row) for row in rows],
+        total=total,
+        page=page,
+        page_size=page_size,
         customer_groups=groups,
         territories=territories,
     )

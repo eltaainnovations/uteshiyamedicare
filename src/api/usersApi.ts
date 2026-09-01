@@ -109,3 +109,11 @@ export async function disablePortalUser(email: string): Promise<PortalUser> {
   })
   return fromBody(body)
 }
+
+export async function changeOwnPassword(currentPassword: string, newPassword: string): Promise<string> {
+  const body = await request<{ detail: string }>('/users/me/change-password', {
+    method: 'POST',
+    body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+  })
+  return body.detail
+}

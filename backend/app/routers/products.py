@@ -15,6 +15,7 @@ ALLOWED_PAGE_SIZES = (20, 50, 100, 200)
 async def list_products(
     search: str | None = Query(default=None, description="Matches item_code or item_name"),
     category: str | None = Query(default=None, description="item_group to filter by"),
+    active_only: bool = Query(default=False, description="Only items with disabled=0"),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20),
     _admin: PortalUser = Depends(require_admin),
@@ -26,7 +27,7 @@ async def list_products(
         )
     try:
         rows, total, categories = await products_service.list_products(
-            search=search, category=category, page=page, page_size=page_size
+            search=search, category=category, active_only=active_only, page=page, page_size=page_size
         )
     except ERPNextUnavailableError as exc:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc

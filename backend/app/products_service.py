@@ -176,22 +176,32 @@ async def _all_categories() -> list[str]:
         filters=[["variant_of", "is", "not set"]],
         fields=["item_group"],
         group_by="item_group",
+        limit_page_length=0,
     )
     return sorted(row["item_group"] for row in rows if row.get("item_group"))
 
 
 async def list_products(
-    *, search: str | None = None, category: str | None = None, page: int = 1, page_size: int = 20
+    *,
+    search: str | None = None,
+    category: str | None = None,
+    active_only: bool = False,
+    page: int = 1,
+    page_size: int = 20,
 ) -> tuple[list[dict[str, Any]], int, list[str]]:
     """Top-level items only (templates + standalone items) — variant rows
     never appear directly in this list. Returns (items, total_matching,
-    categories) — total_matching is scoped to the same search/category
-    filters as the page itself, so pagination stays correct as filters
-    change; categories is always the full unscoped list (see _all_categories).
+    categories) — total_matching is scoped to the same search/category/
+    active_only filters as the page itself, so pagination stays correct as
+    filters change; categories is always the full unscoped list (see
+    _all_categories). active_only is used by the Admin Dashboard's
+    "Active Products" KPI (page_size=20, items discarded, just .total).
     """
     filters: list[Any] = [["variant_of", "is", "not set"]]
     if category:
         filters.append(["item_group", "=", category])
+    if active_only:
+        filters.append(["disabled", "=", 0])
 
     or_filters: list[Any] | None = None
     if search:
