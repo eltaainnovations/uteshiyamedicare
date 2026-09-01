@@ -1,10 +1,10 @@
-from fastapi import APIRouter, Depends, Form
+from fastapi import APIRouter, Depends, Form, HTTPException, status
 from fastapi.responses import HTMLResponse
 
 from .. import users_service
 from ..auth_service import PortalUser
-from ..deps import require_admin
-from ..schemas import CreatePortalUserRequest, PortalUserOut
+from ..deps import get_current_user, require_admin
+from ..schemas import ChangePasswordRequest, CreatePortalUserRequest, MessageResponse, PortalUserOut
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -40,6 +40,17 @@ def create_user(payload: CreatePortalUserRequest, admin: PortalUser = Depends(re
 @router.get("", response_model=list[PortalUserOut])
 def list_all_users(admin: PortalUser = Depends(require_admin)) -> list[PortalUserOut]:
     return [_to_user_out(record) for record in users_service.list_users()]
+
+
+@router.post("/me/change-password", response_model=MessageResponse)
+async def change_own_password(
+    payload: ChangePasswordRequest, current: tuple[PortalUser, str] = Depends(get_current_user)
+) -> MessageResponse:
+    user, _jti = current
+    ok, message = await users_service.change_own_password(user.email, payload.current_password, payload.new_password)
+    if not ok:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=message)
+    return MessageResponse(detail=message)
 
 
 def _page(title: str, message: str) -> str:
