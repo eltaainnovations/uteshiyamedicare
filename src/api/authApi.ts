@@ -82,3 +82,19 @@ export async function logout(token: string): Promise<void> {
     headers: { Authorization: `Bearer ${token}` },
   })
 }
+
+export async function requestPasswordReset(email: string): Promise<string> {
+  const body = await request<{ detail: string }>('/auth/request-password-reset', {
+    method: 'POST',
+    body: JSON.stringify({ email }),
+  })
+  return body.detail
+}
+
+export async function resetPassword(token: string, newPassword: string): Promise<string> {
+  const body = await request<{ detail: string }>('/auth/reset-password', {
+    method: 'POST',
+    body: JSON.stringify({ token, new_password: newPassword }),
+  })
+  return body.detail
+}

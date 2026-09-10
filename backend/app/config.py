@@ -87,5 +87,11 @@ class Settings(BaseSettings):
     # links embedded in emails.
     backend_base_url: str = "http://localhost:8000"
 
+    # Public base URL of the React app. Only the password-reset email link
+    # points here (users_service.request_password_reset) — the first-time
+    # onboarding welcome-email link still points at backend_base_url's
+    # plain HTML form above, since that flow wasn't rebuilt as a React page.
+    frontend_base_url: str = "http://localhost:5173"
+
 
 settings = Settings()

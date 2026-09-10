@@ -59,23 +59,104 @@ def _chunk(codes: list[str], size: int = _BATCH_SIZE) -> list[list[str]]:
     return [codes[i : i + size] for i in range(0, len(codes), size)]
 
 
-async def _stock_by_item_code(item_codes: list[str]) -> dict[str, int]:
-    """Sum Bin.actual_qty across warehouses, per item_code."""
+async def _stock_by_item_code(item_codes: list[str], *, field: str = "actual_qty") -> dict[str, int]:
+    """Sum a Bin quantity column across warehouses, per item_code.
+
+    `field` defaults to actual_qty (on-hand, used by the Admin catalogue);
+    the Distributor catalogue passes projected_qty (on-hand + inbound −
+    reserved − outbound), the number a distributor actually cares about
+    when deciding whether they can order.
+    """
     if not item_codes:
         return {}
     totals: dict[str, int] = dict.fromkeys(item_codes, 0)
     batches = await asyncio.gather(
         *[
             erpnext_get_list(
-                "Bin", filters=[["item_code", "in", chunk]], fields=["item_code", "actual_qty"], limit_page_length=0
+                "Bin", filters=[["item_code", "in", chunk]], fields=["item_code", field], limit_page_length=0
             )
             for chunk in _chunk(item_codes)
         ]
     )
     for bins in batches:
         for row in bins:
-            totals[row["item_code"]] = totals.get(row["item_code"], 0) + int(row.get("actual_qty") or 0)
+            totals[row["item_code"]] = totals.get(row["item_code"], 0) + int(row.get(field) or 0)
     return totals
+
+
+# A distributor-facing "Low Stock" cutoff. Deliberately a fixed constant,
+# not configurable — a distributor-tunable alert threshold against real Bin
+# data is a separate, scoped follow-up (same one the dashboard's dropped
+# Inventory Value KPI is waiting on).
+STOCK_LOW_THRESHOLD = 10
+
+
+def stock_status(total: int) -> str:
+    """`total` is a raw projected_qty sum and CAN be negative (ERPNext
+    nets reserved / committed qty against on-hand) — anything <= 0 is
+    simply Out of Stock to a distributor."""
+    if total <= 0:
+        return "out_of_stock"
+    if total < STOCK_LOW_THRESHOLD:
+        return "low_stock"
+    return "in_stock"
+
+
+async def _scoped_prices_by_item_code(
+    item_codes: list[str], *, customer: str
+) -> dict[str, dict[str, float | None]]:
+    """Per item_code: {"price": customer-specific lowest selling rate or None,
+    "list_price": general (no-customer) lowest selling rate or None}.
+
+    This is the one genuinely new pricing rule for the Distributor
+    Portal — an ERPNext-native customer-specific Item Price wins, with the
+    general price-list rate as the fallback the frontend also shows struck
+    through. (On this ERPNext instance no customer-specific Item Price rows
+    exist yet, so `price` currently always falls back to `list_price`; the
+    lookup is still wired so it just works if Uteshiya adds them.)
+    """
+    if not item_codes:
+        return {}
+    general: dict[str, float] = {}
+    scoped: dict[str, float] = {}
+
+    def _absorb(target: dict[str, float], rows: list[dict[str, Any]]) -> None:
+        for row in rows:
+            code = row["item_code"]
+            rate = float(row.get("price_list_rate") or 0)
+            if code not in target or rate < target[code]:
+                target[code] = rate
+
+    batches = await asyncio.gather(
+        *[
+            erpnext_get_list(
+                "Item Price",
+                filters=[["item_code", "in", chunk], ["selling", "=", 1], ["customer", "is", "not set"]],
+                fields=["item_code", "price_list_rate"],
+                limit_page_length=0,
+            )
+            for chunk in _chunk(item_codes)
+        ],
+        *[
+            erpnext_get_list(
+                "Item Price",
+                filters=[["item_code", "in", chunk], ["selling", "=", 1], ["customer", "=", customer]],
+                fields=["item_code", "price_list_rate"],
+                limit_page_length=0,
+            )
+            for chunk in _chunk(item_codes)
+        ],
+    )
+    half = len(batches) // 2
+    for rows in batches[:half]:
+        _absorb(general, rows)
+    for rows in batches[half:]:
+        _absorb(scoped, rows)
+
+    return {
+        code: {"price": scoped.get(code, general.get(code)), "list_price": general.get(code)}
+        for code in item_codes
+    }
 
 
 async def _lowest_selling_price_by_item_code(item_codes: list[str]) -> dict[str, float]:
@@ -181,6 +262,63 @@ async def _all_categories() -> list[str]:
     return sorted(row["item_group"] for row in rows if row.get("item_group"))
 
 
+def _rollup_codes(item: dict[str, Any], variants_by_template: dict[str, list[str]]) -> list[str]:
+    """The item_codes that carry the real stock/price for a listing row: a
+    template's variant codes, or a standalone item's own code."""
+    if item.get("has_variants"):
+        return variants_by_template.get(item["item_code"], [])
+    return [item["item_code"]]
+
+
+async def _fetch_top_level_page(
+    *,
+    search: str | None,
+    category: str | None,
+    active_only: bool,
+    page: int,
+    page_size: int,
+    extra_fields: tuple[str, ...] = (),
+) -> tuple[list[dict[str, Any]], int, list[str], dict[str, list[str]]]:
+    """Shared page fetch for both the Admin and Distributor catalogues:
+    top-level Item rows + total + full category list + each template's
+    variant codes. The only thing the two callers do differently is how
+    they resolve stock and price on top of this."""
+    filters: list[Any] = [["variant_of", "is", "not set"]]
+    if category:
+        filters.append(["item_group", "=", category])
+    if active_only:
+        filters.append(["disabled", "=", 0])
+
+    or_filters: list[Any] | None = None
+    if search:
+        or_filters = [["item_code", "like", f"%{search}%"], ["item_name", "like", f"%{search}%"]]
+
+    items, count_rows, categories = await asyncio.gather(
+        erpnext_get_list(
+            "Item",
+            filters=filters,
+            or_filters=or_filters,
+            fields=["item_code", "item_name", "item_group", "has_variants", *extra_fields],
+            limit_page_length=page_size,
+            limit_start=(page - 1) * page_size,
+        ),
+        erpnext_get_list(
+            "Item",
+            filters=filters,
+            or_filters=or_filters,
+            fields=["count(name) as total_count"],
+        ),
+        _all_categories(),
+    )
+    total = count_rows[0]["total_count"] if count_rows else 0
+    if not items:
+        return [], total, categories, {}
+
+    template_codes = [i["item_code"] for i in items if i.get("has_variants")]
+    variants_by_template = await _variant_codes_by_template(template_codes)
+    return items, total, categories, variants_by_template
+
+
 async def list_products(
     *,
     search: str | None = None,
@@ -197,49 +335,13 @@ async def list_products(
     _all_categories). active_only is used by the Admin Dashboard's
     "Active Products" KPI (page_size=20, items discarded, just .total).
     """
-    filters: list[Any] = [["variant_of", "is", "not set"]]
-    if category:
-        filters.append(["item_group", "=", category])
-    if active_only:
-        filters.append(["disabled", "=", 0])
-
-    or_filters: list[Any] | None = None
-    if search:
-        or_filters = [["item_code", "like", f"%{search}%"], ["item_name", "like", f"%{search}%"]]
-
-    items, count_rows, categories = await asyncio.gather(
-        erpnext_get_list(
-            "Item",
-            filters=filters,
-            or_filters=or_filters,
-            fields=["item_code", "item_name", "item_group", "has_variants"],
-            limit_page_length=page_size,
-            limit_start=(page - 1) * page_size,
-        ),
-        erpnext_get_list(
-            "Item",
-            filters=filters,
-            or_filters=or_filters,
-            fields=["count(name) as total_count"],
-        ),
-        _all_categories(),
+    items, total, categories, variants_by_template = await _fetch_top_level_page(
+        search=search, category=category, active_only=active_only, page=page, page_size=page_size
     )
-    total = count_rows[0]["total_count"] if count_rows else 0
     if not items:
         return [], total, categories
 
-    template_codes = [i["item_code"] for i in items if i.get("has_variants")]
-    variants_by_template = await _variant_codes_by_template(template_codes)
-
-    lookup_codes: set[str] = set()
-    for item in items:
-        code = item["item_code"]
-        if item.get("has_variants"):
-            lookup_codes.update(variants_by_template.get(code, []))
-        else:
-            lookup_codes.add(code)
-    lookup_codes_list = list(lookup_codes)
-
+    lookup_codes_list = list({c for item in items for c in _rollup_codes(item, variants_by_template)})
     stock_map, price_map = await asyncio.gather(
         _stock_by_item_code(lookup_codes_list),
         _lowest_selling_price_by_item_code(lookup_codes_list),
@@ -247,12 +349,11 @@ async def list_products(
 
     results: list[dict[str, Any]] = []
     for item in items:
-        code = item["item_code"]
-        rollup_codes = variants_by_template.get(code, []) if item.get("has_variants") else [code]
+        rollup_codes = _rollup_codes(item, variants_by_template)
         prices = [price_map[c] for c in rollup_codes if c in price_map]
         results.append(
             {
-                "item_code": code,
+                "item_code": item["item_code"],
                 "item_name": item["item_name"],
                 "item_group": item["item_group"],
                 "has_variants": bool(item.get("has_variants")),
@@ -261,6 +362,105 @@ async def list_products(
             }
         )
     return results, total, categories
+
+
+async def list_distributor_products(
+    *,
+    customer: str,
+    search: str | None = None,
+    category: str | None = None,
+    page: int = 1,
+    page_size: int = 20,
+) -> tuple[list[dict[str, Any]], int, list[str]]:
+    """Distributor-facing catalogue page. Same top-level Item fetch as
+    list_products (via _fetch_top_level_page), but stock is Bin.projected_qty
+    and price is resolved customer-first (see _scoped_prices_by_item_code).
+    `price`/`list_price` on a template row are the lowest across its
+    variants — the "from" price the card shows."""
+    items, total, categories, variants_by_template = await _fetch_top_level_page(
+        search=search, category=category, active_only=False, page=page, page_size=page_size, extra_fields=("image",)
+    )
+    if not items:
+        return [], total, categories
+
+    lookup_codes_list = list({c for item in items for c in _rollup_codes(item, variants_by_template)})
+    stock_map, price_map = await asyncio.gather(
+        _stock_by_item_code(lookup_codes_list, field="projected_qty"),
+        _scoped_prices_by_item_code(lookup_codes_list, customer=customer),
+    )
+
+    results: list[dict[str, Any]] = []
+    for item in items:
+        rollup_codes = _rollup_codes(item, variants_by_template)
+        prices = [price_map[c]["price"] for c in rollup_codes if price_map.get(c, {}).get("price") is not None]
+        list_prices = [
+            price_map[c]["list_price"] for c in rollup_codes if price_map.get(c, {}).get("list_price") is not None
+        ]
+        raw_stock = sum(stock_map.get(c, 0) for c in rollup_codes)
+        results.append(
+            {
+                "item_code": item["item_code"],
+                "item_name": item["item_name"],
+                "item_group": item["item_group"],
+                "has_variants": bool(item.get("has_variants")),
+                "image": item.get("image") or None,
+                "total_stock": max(0, raw_stock),  # negative projected_qty reads as 0 to a shopper
+                "stock_status": stock_status(raw_stock),
+                "price": min(prices) if prices else None,
+                "list_price": min(list_prices) if list_prices else None,
+            }
+        )
+    return results, total, categories
+
+
+async def list_distributor_variants(item_code: str, *, customer: str) -> dict[str, Any]:
+    """Per-variant rows for one template (or the single row for a standalone
+    item), with the same projected-stock + customer-scoped price resolution
+    as list_distributor_products. Reuses the same variant_of lookup and
+    bulk-attributes join get_product_detail uses."""
+    item = await erpnext_get_doc("Item", item_code)
+
+    variant_rows: list[dict[str, Any]] = []
+    if item.get("has_variants"):
+        variant_rows = await erpnext_get_list(
+            "Item",
+            filters=[["variant_of", "=", item_code]],
+            fields=["item_code", "item_name"],
+            limit_page_length=0,
+        )
+    variant_codes = [v["item_code"] for v in variant_rows] if variant_rows else [item_code]
+
+    stock_map, price_map, attrs_map = await asyncio.gather(
+        _stock_by_item_code(variant_codes, field="projected_qty"),
+        _scoped_prices_by_item_code(variant_codes, customer=customer),
+        _attributes_by_item_code(variant_codes) if variant_rows else asyncio.sleep(0, result={}),
+    )
+
+    source = variant_rows or [{"item_code": item_code, "item_name": item.get("item_name")}]
+    variants: list[dict[str, Any]] = []
+    for row in source:
+        code = row["item_code"]
+        raw_stock = stock_map.get(code, 0)
+        p = price_map.get(code, {"price": None, "list_price": None})
+        variants.append(
+            {
+                "item_code": code,
+                "item_name": row["item_name"],
+                "total_stock": max(0, raw_stock),
+                "stock_status": stock_status(raw_stock),
+                "price": p["price"],
+                "list_price": p["list_price"],
+                "attributes": attrs_map.get(code) or ([] if variant_rows else _extract_attributes(item)),
+            }
+        )
+
+    return {
+        "item_code": item["item_code"],
+        "item_name": item.get("item_name"),
+        "has_variants": bool(item.get("has_variants")),
+        "image": item.get("image") or None,
+        "variants": variants,
+    }
 
 
 async def get_product_detail(item_code: str) -> dict[str, Any]:

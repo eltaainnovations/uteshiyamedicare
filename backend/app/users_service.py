@@ -21,8 +21,10 @@ from .config import settings
 from .erpnext_client import (
     ERPNextAuthError,
     ERPNextDuplicateUserError,
+    ERPNextNotFoundError,
     ERPNextUnavailableError,
     erpnext_create_user,
+    erpnext_get_doc,
     erpnext_login,
     erpnext_logout,
     erpnext_update_user,
@@ -54,6 +56,7 @@ class PortalUserRow:
     failed_attempts: int
     locked_until: str | None
     password_history: str | None
+    password_hash: str | None
 
 
 def _get_conn() -> sqlite3.Connection:
@@ -91,6 +94,11 @@ def init_db() -> None:
             "ALTER TABLE portal_users ADD COLUMN failed_attempts INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE portal_users ADD COLUMN locked_until TEXT",
             "ALTER TABLE portal_users ADD COLUMN password_history TEXT",
+            # Local (Portal-only) auth for Distributor accounts, which have
+            # no real ERPNext User — see authenticate_credentials and
+            # _apply_new_password. NULL for every other role; never
+            # populated, never checked for admin/manager/sales_person.
+            "ALTER TABLE portal_users ADD COLUMN password_hash TEXT",
         ):
             try:
                 conn.execute(column_ddl)
@@ -254,6 +262,82 @@ def create_draft(
     return record
 
 
+async def link_existing_user(
+    *,
+    email: str,
+    portal_role: Role,
+    erpnext_customer_link: str | None,
+    requested_by_email: str,
+) -> PortalUserRow:
+    """Links an already-existing, enabled ERPNext User straight to an
+    Active portal_users row — alternate to create_draft's Draft ->
+    approval -> erpnext_create_user flow, for accounts (test or real)
+    that predate the Portal. No ERPNext account is created and no
+    onboarding token is issued: the person already has working ERPNext
+    credentials, so there's no first-time password to set."""
+    if portal_role == "distributor":
+        # Distributor accounts use local Portal authentication and never
+        # have a real ERPNext User (see authenticate_credentials) — there
+        # is nothing for this flow to link to. Use "Add User" instead.
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail="Distributor accounts don't use ERPNext accounts — use \"Add User\" instead of linking an existing one.",
+        )
+
+    email = email.lower()
+
+    if get_by_email(email) is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail="A portal user with this email already exists")
+
+    try:
+        doc = await erpnext_get_doc("User", email, use_user_token=True)
+    except ERPNextNotFoundError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="No ERPNext user exists with this email")
+    except ERPNextUnavailableError:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail="Could not reach ERPNext. Please try again shortly.")
+
+    if not doc.get("enabled"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="This ERPNext user is disabled. Enable it in ERPNext first.")
+
+    first_name = doc.get("first_name") or email.split("@")[0]
+    last_name = doc.get("last_name") or ""
+
+    # A user created directly in ERPNext (rather than via
+    # erpnext_create_user, which always sets this) may be missing the
+    # Customer role the Portal relies on.
+    existing_roles = {r.get("role") for r in doc.get("roles", [])}
+    if "Customer" not in existing_roles:
+        await erpnext_update_user(email, {"roles": [{"role": "Customer"}]})
+
+    now = _now()
+    with _get_conn() as conn:
+        try:
+            conn.execute(
+                """
+                INSERT INTO portal_users (
+                    email, first_name, last_name, portal_role, erpnext_customer_link,
+                    status, requested_by_email, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?)
+                """,
+                (email, first_name, last_name, portal_role, erpnext_customer_link, requested_by_email, _iso(now), _iso(now)),
+            )
+        except sqlite3.IntegrityError:
+            raise HTTPException(status.HTTP_409_CONFLICT, detail="A portal user with this email already exists")
+
+    if settings_service.get_notification_rules().welcome_email:
+        _send_email(
+            email,
+            "Your Uteshiya Medicare Portal access is ready",
+            f"Your existing ERPNext account now has access to the Portal as {portal_role}. "
+            f"Log in with your usual ERPNext email and password at {settings.frontend_base_url}/login.\n"
+            'Use "Forgot password?" there if you\'d like to set a new one.',
+        )
+
+    record = get_by_email(email)
+    assert record is not None
+    return record
+
+
 async def approve_and_provision(token: str) -> tuple[bool, str]:
     with _get_conn() as conn:
         row = conn.execute("SELECT * FROM portal_users WHERE approval_token = ?", (token,)).fetchone()
@@ -272,20 +356,28 @@ async def approve_and_provision(token: str) -> tuple[bool, str]:
     temp_password = _generate_temp_password()
     now = _now()
 
-    try:
-        await erpnext_create_user(
-            email=record.email,
-            first_name=record.first_name,
-            last_name=record.last_name,
-            new_password=temp_password,
-            roles=["Customer"],
-        )
-    except ERPNextDuplicateUserError:
-        _mark_failed(record.email, "ERPNext already has a user with this email (duplicate)")
-        return False, "Provisioning failed: a user with this email already exists in ERPNext."
-    except ERPNextUnavailableError as exc:
-        _mark_failed(record.email, f"ERPNext error: {exc}")
-        return False, "Provisioning failed due to an ERPNext error. Please contact the administrator."
+    if record.portal_role == "distributor":
+        # Distributor accounts have no real ERPNext User and never will —
+        # the temp password is hashed and stored locally instead of sent
+        # to ERPNext, and gets overwritten for real at the onboarding step
+        # below, same as the ERPNext-backed roles' temp password does.
+        password_hash = hash_password(temp_password)
+    else:
+        password_hash = None
+        try:
+            await erpnext_create_user(
+                email=record.email,
+                first_name=record.first_name,
+                last_name=record.last_name,
+                new_password=temp_password,
+                roles=["Customer"],
+            )
+        except ERPNextDuplicateUserError:
+            _mark_failed(record.email, "ERPNext already has a user with this email (duplicate)")
+            return False, "Provisioning failed: a user with this email already exists in ERPNext."
+        except ERPNextUnavailableError as exc:
+            _mark_failed(record.email, f"ERPNext error: {exc}")
+            return False, "Provisioning failed due to an ERPNext error. Please contact the administrator."
 
     onboarding_token = secrets.token_urlsafe(32)
     onboarding_expires = now + timedelta(hours=settings.onboarding_token_ttl_hours)
@@ -294,10 +386,11 @@ async def approve_and_provision(token: str) -> tuple[bool, str]:
             """
             UPDATE portal_users
             SET status = 'active', approval_token = NULL, approval_token_expires_at = NULL,
-                onboarding_token = ?, onboarding_token_expires_at = ?, updated_at = ?
+                onboarding_token = ?, onboarding_token_expires_at = ?, updated_at = ?,
+                password_hash = COALESCE(?, password_hash)
             WHERE email = ?
             """,
-            (onboarding_token, _iso(onboarding_expires), _iso(now), record.email),
+            (onboarding_token, _iso(onboarding_expires), _iso(now), password_hash, record.email),
         )
 
     welcome_enabled = settings_service.get_notification_rules().welcome_email
@@ -350,6 +443,23 @@ def _record_password_history(email: str, password_history_json: str | None, new_
         )
 
 
+async def _apply_new_password(record: PortalUserRow, new_password: str) -> None:
+    """Writes new_password wherever it actually lives for this role —
+    the local hash for Distributor (no ERPNext User exists to update),
+    ERPNext for everyone else. Shared by set_password_via_onboarding and
+    change_own_password so the two can't drift on this. Raises
+    ERPNextUnavailableError exactly as the old inline erpnext_update_user
+    call did — that can only happen on the non-Distributor branch."""
+    if record.portal_role == "distributor":
+        with _get_conn() as conn:
+            conn.execute(
+                "UPDATE portal_users SET password_hash = ?, updated_at = ? WHERE email = ?",
+                (hash_password(new_password), _iso(_now()), record.email),
+            )
+    else:
+        await erpnext_update_user(record.email, {"new_password": new_password})
+
+
 async def set_password_via_onboarding(token: str, new_password: str) -> tuple[bool, str]:
     """Sets a password given a valid token from the onboarding_token
     column. Serves both first-time onboarding (approve_and_provision) and
@@ -368,6 +478,13 @@ async def set_password_via_onboarding(token: str, new_password: str) -> tuple[bo
     if expires_at is not None and _now() > expires_at:
         return False, "This link has expired. Please contact your administrator for a new invite."
 
+    # Covers the case where the account was disabled after this token was
+    # issued (request_password_reset already refuses to issue one to a
+    # non-active account, but that doesn't retroactively invalidate a link
+    # sent while the account was still active).
+    if record.status == "disabled":
+        return False, "This account is disabled. Contact your administrator."
+
     security = settings_service.get_security_config()
     violations = check_password_policy(new_password, security)
     if violations:
@@ -377,7 +494,7 @@ async def set_password_via_onboarding(token: str, new_password: str) -> tuple[bo
         return False, f"You can't reuse any of your last {security.prevent_reuse_count} password(s). Choose a different one."
 
     try:
-        await erpnext_update_user(record.email, {"new_password": new_password})
+        await _apply_new_password(record, new_password)
     except ERPNextUnavailableError:
         return False, "Could not update your password right now. Please try again shortly."
 
@@ -392,26 +509,33 @@ async def set_password_via_onboarding(token: str, new_password: str) -> tuple[bo
 
 async def change_own_password(email: str, current_password: str, new_password: str) -> tuple[bool, str]:
     """Self-service password change for an already-logged-in user. Never
-    trusts the client-supplied current_password — verifies it against
-    ERPNext the same way a real login does, then applies the exact same
-    policy/reuse checks and ERPNext update call as onboarding above."""
+    trusts the client-supplied current_password — verifies it the same
+    way a real login does (local hash for Distributor, ERPNext for
+    everyone else — see authenticate_credentials), then applies the
+    exact same policy/reuse checks and password write as onboarding
+    above."""
     email = email.lower()
     record = get_by_email(email)
     if record is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Portal user not found")
 
-    try:
-        session = await erpnext_login(email, current_password)
-    except ERPNextAuthError:
-        return False, "Current password is incorrect."
-    except ERPNextUnavailableError:
-        return False, "Could not verify your current password right now. Please try again shortly."
+    if record.portal_role == "distributor":
+        if not verify_password(current_password, record.password_hash or ""):
+            return False, "Current password is incorrect."
     else:
-        # Verification-only login — this sid is never stored, so it must
-        # be closed immediately rather than left as an orphaned ERPNext
-        # session (same reasoning as auth_service.authenticate_credentials
-        # when a login succeeds but the caller can't proceed).
-        await erpnext_logout(session.sid)
+        try:
+            session = await erpnext_login(email, current_password)
+        except ERPNextAuthError:
+            return False, "Current password is incorrect."
+        except ERPNextUnavailableError:
+            return False, "Could not verify your current password right now. Please try again shortly."
+        else:
+            # Verification-only login — this sid is never stored, so it
+            # must be closed immediately rather than left as an orphaned
+            # ERPNext session (same reasoning as
+            # auth_service.authenticate_credentials when a login succeeds
+            # but the caller can't proceed).
+            await erpnext_logout(session.sid)
 
     security = settings_service.get_security_config()
     violations = check_password_policy(new_password, security)
@@ -422,7 +546,7 @@ async def change_own_password(email: str, current_password: str, new_password: s
         return False, f"You can't reuse any of your last {security.prevent_reuse_count} password(s). Choose a different one."
 
     try:
-        await erpnext_update_user(record.email, {"new_password": new_password})
+        await _apply_new_password(record, new_password)
     except ERPNextUnavailableError:
         return False, "Could not change your password right now. Please try again shortly."
 
@@ -449,7 +573,7 @@ async def request_password_reset(email: str) -> None:
         )
 
     if settings_service.get_notification_rules().password_reset_email:
-        reset_url = f"{settings.backend_base_url}/users/onboarding/{reset_token}"
+        reset_url = f"{settings.frontend_base_url}/reset-password?token={reset_token}"
         _send_email(
             record.email,
             "Reset your Portal password",
@@ -471,10 +595,11 @@ async def disable_user(email: str) -> PortalUserRow:
             (_iso(_now()), record.email),
         )
 
-    try:
-        await erpnext_update_user(record.email, {"enabled": 0})
-    except ERPNextUnavailableError as exc:
-        logger.warning("ERPNext disable failed for %s (local disable already applied): %s", record.email, exc)
+    if record.portal_role != "distributor":
+        try:
+            await erpnext_update_user(record.email, {"enabled": 0})
+        except ERPNextUnavailableError as exc:
+            logger.warning("ERPNext disable failed for %s (local disable already applied): %s", record.email, exc)
 
     if settings_service.get_notification_rules().account_status_change_email:
         _send_email(

@@ -4,7 +4,7 @@ from fastapi.responses import HTMLResponse
 from .. import users_service
 from ..auth_service import PortalUser
 from ..deps import get_current_user, require_admin
-from ..schemas import ChangePasswordRequest, CreatePortalUserRequest, MessageResponse, PortalUserOut
+from ..schemas import ChangePasswordRequest, CreatePortalUserRequest, LinkExistingUserRequest, MessageResponse, PortalUserOut
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -30,6 +30,19 @@ def create_user(payload: CreatePortalUserRequest, admin: PortalUser = Depends(re
         email=payload.email,
         first_name=payload.first_name,
         last_name=payload.last_name,
+        portal_role=payload.portal_role,
+        erpnext_customer_link=payload.erpnext_customer_link,
+        requested_by_email=admin.email,
+    )
+    return _to_user_out(record)
+
+
+@router.post("/link-existing", response_model=PortalUserOut, status_code=201)
+async def link_existing_user(
+    payload: LinkExistingUserRequest, admin: PortalUser = Depends(require_admin)
+) -> PortalUserOut:
+    record = await users_service.link_existing_user(
+        email=payload.email,
         portal_role=payload.portal_role,
         erpnext_customer_link=payload.erpnext_customer_link,
         requested_by_email=admin.email,

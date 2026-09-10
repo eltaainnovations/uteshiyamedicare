@@ -177,6 +177,40 @@ async def erpnext_update_user(email: str, fields: dict[str, Any]) -> None:
         raise ERPNextUnavailableError(f"ERPNext returned status {response.status_code}")
 
 
+async def erpnext_update_doc(
+    doctype: str, name: str, fields: dict[str, Any], *, use_user_token: bool = True
+) -> dict[str, Any]:
+    """PUT /api/resource/{doctype}/{name} with only the fields being changed —
+    same shape as erpnext_update_user, generalised. Used for Sales Order
+    submit/cancel (docstatus 1/2) from the Distributor Portal's approval
+    widget. Defaults to the Users-scoped token (the only write key the
+    Portal holds); the catalogue key is read-only.
+
+    NOTE: submit/cancel via this call needs the key's ERPNext user to hold
+    submit + cancel permission on the doctype — see the Sales Invoice read
+    gap already flagged in orders_service. If that permission is missing
+    ERPNext answers non-200 and this raises ERPNextUnavailableError.
+    """
+    url = f"{settings.erpnext_base_url}/api/resource/{quote(doctype, safe='')}/{quote(name, safe='')}"
+    headers = _token_auth_header() if use_user_token else _catalogue_auth_header()
+    try:
+        response = await _get_client().put(url, json=fields, headers=headers)
+    except httpx.HTTPError as exc:
+        logger.warning("ERPNext PUT %s/%s failed: %s", doctype, name, exc)
+        raise ERPNextUnavailableError("Could not reach ERPNext") from exc
+
+    if response.status_code == 404:
+        raise ERPNextNotFoundError(f"{doctype} {name} not found")
+
+    if response.status_code != 200:
+        logger.warning(
+            "ERPNext PUT %s/%s returned status %s: %s", doctype, name, response.status_code, response.text
+        )
+        raise ERPNextUnavailableError(f"ERPNext returned status {response.status_code}")
+
+    return response.json().get("data", {})
+
+
 async def erpnext_get_list(
     doctype: str,
     *,

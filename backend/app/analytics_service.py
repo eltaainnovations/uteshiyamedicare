@@ -13,6 +13,20 @@ from . import orders_service
 _TOP_DISTRIBUTORS_LIMIT = 20
 _TOP_PRODUCTS_LIMIT = 20
 
+# ERPNext Sales Order statuses that mean "placed, not yet fulfilled" — the
+# same set the Admin Dashboard's Pending Orders KPI uses. Shared with
+# routers.portal for the Distributor Dashboard's Pending Orders KPI.
+PENDING_STATUSES = ("To Deliver", "To Bill", "To Deliver and Bill")
+
+
+async def pending_order_value(from_date: str, to_date: str, customer: str | None) -> float:
+    """Total grand_total of not-yet-fulfilled Sales Orders in range — the
+    "pending value" sub-label on the Distributor Dashboard's Pending Orders
+    KPI. Reuses the same orders fetch every other function here does; the
+    status bucketing is this module's job, not a new ERPNext call."""
+    orders = await orders_service.list_orders_in_range(from_date, to_date, customer=customer)
+    return sum(o["grand_total"] for o in orders if o["status"] in PENDING_STATUSES)
+
 
 def _bucket_key(iso_date: str, granularity: str) -> str:
     d = date.fromisoformat(iso_date)

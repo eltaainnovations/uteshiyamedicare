@@ -65,6 +65,17 @@ async def list_distributors(
     return results, total, groups, territories
 
 
+async def get_customer_name(name: str) -> str | None:
+    """Just the display name for one Customer — the Distributor Portal's
+    welcome banner needs the company name and nothing else, so this skips
+    the Address/Contact fan-out get_distributor_detail does."""
+    try:
+        customer = await erpnext_get_doc("Customer", name)
+    except ERPNextNotFoundError:
+        return None
+    return customer.get("customer_name")
+
+
 async def get_distributor_detail(name: str) -> dict[str, Any]:
     try:
         customer = await erpnext_get_doc("Customer", name)

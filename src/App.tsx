@@ -3,14 +3,21 @@ import AdminDashboard from './components/admin/AdminDashboard'
 import AdminPortal from './components/admin/AdminPortal'
 import Analytics from './components/admin/Analytics'
 import Distributors from './components/admin/Distributors'
+import Offers from './components/admin/Offers'
 import Orders from './components/admin/Orders'
 import ProductCatalogue from './components/admin/ProductCatalogue'
 import Profile from './components/admin/Profile'
 import Reports from './components/admin/Reports'
 import SettingsScreen from './components/admin/Settings'
 import UserManagement from './components/admin/UserManagement'
+import ForgotPassword from './components/auth/ForgotPassword'
 import Login from './components/auth/Login'
+import ResetPassword from './components/auth/ResetPassword'
 import DashboardPlaceholder from './components/DashboardPlaceholder'
+import DistEndUsers from './components/distributor/DistEndUsers'
+import DistInventory from './components/distributor/DistInventory'
+import DistProductCatalogue from './components/distributor/DistProductCatalogue'
+import DistributorDashboard from './components/distributor/DistributorDashboard'
 import DistributorPortal from './components/distributor/DistributorPortal'
 import Placeholder from './components/layout/Placeholder'
 import { ADMIN_NAV_ITEMS, DISTRIBUTOR_NAV_ITEMS, screenTitle } from './config/navigation'
@@ -79,6 +86,8 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={<LoginRoute />} />
+      <Route path="/forgot-password" element={<ForgotPassword />} />
+      <Route path="/reset-password" element={<ResetPassword />} />
 
       <Route path="/admin" element={<RoleGate role="admin" />}>
         <Route element={<AdminPortal />}>
@@ -98,6 +107,8 @@ function AppRoutes() {
                   <Distributors />
                 ) : item.screen === 'orders' ? (
                   <Orders />
+                ) : item.screen === 'offers' ? (
+                  <Offers />
                 ) : item.screen === 'reports' ? (
                   <Reports />
                 ) : item.screen === 'analytics' ? (
@@ -120,7 +131,23 @@ function AppRoutes() {
         <Route element={<DistributorPortal />}>
           <Route index element={<Navigate to="dashboard" replace />} />
           {DISTRIBUTOR_NAV_ITEMS.map((item) => (
-            <Route key={item.screen} path={item.path} element={<Placeholder title={screenTitle[item.screen]} />} />
+            <Route
+              key={item.screen}
+              path={item.path}
+              element={
+                item.screen === 'dist-dashboard' ? (
+                  <DistributorDashboard />
+                ) : item.screen === 'dist-products' ? (
+                  <DistProductCatalogue />
+                ) : item.screen === 'dist-inventory' ? (
+                  <DistInventory />
+                ) : item.screen === 'dist-end-users' ? (
+                  <DistEndUsers />
+                ) : (
+                  <Placeholder title={screenTitle[item.screen]} />
+                )
+              }
+            />
           ))}
           <Route path="*" element={<Navigate to="dashboard" replace />} />
         </Route>

@@ -10,6 +10,7 @@ import {
   Package,
   Settings,
   ShoppingCart,
+  Tag,
   TrendingUp,
   Truck,
   UserCircle,
@@ -22,6 +23,7 @@ export type Screen =
   | 'distributors'
   | 'product-catalogue'
   | 'orders'
+  | 'offers'
   | 'email-management'
   | 'reports'
   | 'analytics'
@@ -52,6 +54,7 @@ export const screenTitle: Record<Screen, string> = {
   distributors: 'Distributors',
   'product-catalogue': 'Product Catalogue',
   orders: 'Orders',
+  offers: 'Offers',
   'email-management': 'Email Management',
   reports: 'Reports',
   analytics: 'Analytics',
@@ -75,6 +78,7 @@ export const ADMIN_NAV_ITEMS: NavItem[] = [
   { icon: Building2, label: 'Distributors', screen: 'distributors', path: 'distributors' },
   { icon: Package, label: 'Product Catalogue', screen: 'product-catalogue', path: 'product-catalogue' },
   { icon: ShoppingCart, label: 'Orders', screen: 'orders', path: 'orders' },
+  { icon: Tag, label: 'Offers', screen: 'offers', path: 'offers' },
   { icon: BarChart2, label: 'Reports', screen: 'reports', path: 'reports' },
   { icon: TrendingUp, label: 'Analytics', screen: 'analytics', path: 'analytics' },
   { icon: Settings, label: 'Settings', screen: 'settings', path: 'settings' },

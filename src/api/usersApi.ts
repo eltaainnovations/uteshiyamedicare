@@ -26,6 +26,12 @@ export interface CreatePortalUserPayload {
   erpnextCustomerLink?: string
 }
 
+export interface LinkExistingUserPayload {
+  email: string
+  portalRole: Role
+  erpnextCustomerLink?: string
+}
+
 interface PortalUserBody {
   email: string
   first_name: string
@@ -96,6 +102,18 @@ export async function createPortalUser(payload: CreatePortalUserPayload): Promis
       email: payload.email,
       first_name: payload.firstName,
       last_name: payload.lastName,
+      portal_role: payload.portalRole,
+      erpnext_customer_link: payload.erpnextCustomerLink || null,
+    }),
+  })
+  return fromBody(body)
+}
+
+export async function linkExistingUser(payload: LinkExistingUserPayload): Promise<PortalUser> {
+  const body = await request<PortalUserBody>('/users/link-existing', {
+    method: 'POST',
+    body: JSON.stringify({
+      email: payload.email,
       portal_role: payload.portalRole,
       erpnext_customer_link: payload.erpnextCustomerLink || null,
     }),

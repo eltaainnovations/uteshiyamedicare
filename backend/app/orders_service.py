@@ -12,9 +12,17 @@ raising, so the rest of an order's detail still loads.
 """
 
 import asyncio
+from datetime import date
 from typing import Any
 
-from .erpnext_client import ERPNextNotFoundError, ERPNextUnavailableError, erpnext_get_count, erpnext_get_doc, erpnext_get_list
+from .erpnext_client import (
+    ERPNextNotFoundError,
+    ERPNextUnavailableError,
+    erpnext_get_count,
+    erpnext_get_doc,
+    erpnext_get_list,
+    erpnext_update_doc,
+)
 
 _LIST_FIELDS = ["name", "customer", "customer_name", "transaction_date", "delivery_date", "status", "grand_total"]
 
@@ -201,6 +209,67 @@ async def first_order_dates() -> dict[str, str]:
         use_user_token=True,
     )
     return {row["customer"]: row["first_date"] for row in rows if row.get("first_date")}
+
+
+async def list_pending_approval_orders(customer: str) -> list[dict[str, Any]]:
+    """Draft (docstatus=0) Sales Orders for one Customer — the distributor-
+    approval queue. Same row shape as list_orders; `customer` is always the
+    caller's own scoped id (see routers.portal), never a request value.
+
+    Empty until Sales Person draft-order creation exists — that's expected,
+    not an error state.
+    """
+    orders = await erpnext_get_list(
+        "Sales Order",
+        filters=[["customer", "=", customer], ["docstatus", "=", 0]],
+        fields=_LIST_FIELDS,
+        limit_page_length=0,
+        order_by="transaction_date desc",
+        use_user_token=True,
+    )
+    counts = await _item_counts([o["name"] for o in orders])
+    return _shape_order_rows(orders, counts)
+
+
+async def set_order_docstatus(name: str, docstatus: int, *, expected_customer: str) -> None:
+    """Submit (docstatus=1) or cancel (docstatus=2) a Sales Order after
+    verifying it belongs to `expected_customer` — defence in depth so a
+    distributor can't act on another Customer's order by guessing its name.
+    Raises ERPNextNotFoundError if it's missing or not theirs.
+    """
+    order = await erpnext_get_doc("Sales Order", name, use_user_token=True)
+    if order.get("customer") != expected_customer:
+        raise ERPNextNotFoundError(f"Sales Order {name} not found")
+    await erpnext_update_doc("Sales Order", name, {"docstatus": docstatus}, use_user_token=True)
+
+
+async def outstanding_for_customer(customer: str) -> dict[str, Any]:
+    """Total unpaid Sales Invoice value + overdue count for one Customer.
+
+    KNOWN GAP: the Users-scoped key currently has no Sales Invoice read
+    permission at all (see module docstring), so this degrades to zeros
+    with available=False rather than raising — the KPI card shows
+    "unavailable" until Uteshiya grants the permission.
+    """
+    try:
+        invoices = await erpnext_get_list(
+            "Sales Invoice",
+            filters=[["customer", "=", customer], ["outstanding_amount", ">", 0]],
+            fields=["name", "outstanding_amount", "due_date", "status"],
+            limit_page_length=0,
+            use_user_token=True,
+        )
+    except ERPNextUnavailableError:
+        return {"outstanding": 0.0, "overdue_count": 0, "available": False}
+
+    today = date.today().isoformat()
+    outstanding = sum(float(inv.get("outstanding_amount") or 0) for inv in invoices)
+    overdue_count = sum(
+        1
+        for inv in invoices
+        if inv.get("status") == "Overdue" or (inv.get("due_date") and inv["due_date"] < today)
+    )
+    return {"outstanding": outstanding, "overdue_count": overdue_count, "available": True}
 
 
 async def _find_linked_invoice(order_name: str, customer: str) -> dict[str, Any] | None:
