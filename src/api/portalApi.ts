@@ -1,6 +1,6 @@
 import { getStoredToken } from '../context/AuthContext'
 import { ApiError } from '../types/auth'
-import type { OrderListItem, OrderListPage } from './ordersApi'
+import type { OrderDetail, OrderListItem, OrderListPage } from './ordersApi'
 
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 
@@ -126,6 +126,13 @@ function mapOrderRow(o: OrderListItemBody): OrderListItem {
     itemCount: o.item_count,
     grandTotal: o.grand_total,
   }
+}
+
+/** Display-only identity for the Profile screen — same shape as the
+ * dashboard's `welcome` block, fetched on its own (no KPI/chart calls). */
+export async function fetchDistributorProfile(): Promise<PortalWelcome> {
+  const b = await request<{ name: string; company: string | null; customer_id: string }>('/portal/profile')
+  return { name: b.name, company: b.company, customerId: b.customer_id }
 }
 
 export async function fetchPortalDashboard(): Promise<PortalDashboard> {
@@ -522,4 +529,234 @@ export async function updateEndUserFeedback(id: number, input: EndUserFeedbackIn
       complication: input.complication,
     }),
   })
+}
+
+// --- Active / Completed Orders ---------------------------------------
+
+interface OrderListItemBodyFull {
+  name: string
+  customer: string
+  customer_name: string | null
+  transaction_date: string | null
+  delivery_date: string | null
+  status: string
+  item_count: number
+  grand_total: number
+}
+
+function mapOrderListItem(o: OrderListItemBodyFull): OrderListItem {
+  return {
+    name: o.name,
+    customer: o.customer,
+    customerName: o.customer_name,
+    transactionDate: o.transaction_date,
+    deliveryDate: o.delivery_date,
+    status: o.status,
+    itemCount: o.item_count,
+    grandTotal: o.grand_total,
+  }
+}
+
+export async function fetchActiveOrders(
+  params: { search?: string; page?: number; pageSize?: number } = {},
+): Promise<OrderListPage> {
+  const q = new URLSearchParams()
+  if (params.search) q.set('search', params.search)
+  q.set('page', String(params.page ?? 1))
+  q.set('page_size', String(params.pageSize ?? 50))
+  const body = await request<{
+    items: OrderListItemBodyFull[]
+    total: number
+    page: number
+    page_size: number
+    statuses: string[]
+  }>(`/portal/orders/active?${q.toString()}`)
+  return {
+    items: body.items.map(mapOrderListItem),
+    total: body.total,
+    page: body.page,
+    pageSize: body.page_size,
+    statuses: body.statuses,
+  }
+}
+
+export interface CompletedOrder {
+  name: string
+  customerName: string | null
+  transactionDate: string | null
+  deliveryDate: string | null
+  status: string
+  itemCount: number
+  grandTotal: number
+  itemNames: string[]
+}
+
+export interface CompletedOrdersStats {
+  totalCompleted: number
+  totalValue: number
+  avgOrderValue: number
+}
+
+export async function fetchCompletedOrders(range: {
+  fromDate: string
+  toDate: string
+}): Promise<{ items: CompletedOrder[]; stats: CompletedOrdersStats }> {
+  const q = new URLSearchParams({ from_date: range.fromDate, to_date: range.toDate })
+  const body = await request<{
+    items: {
+      name: string
+      customer_name: string | null
+      transaction_date: string | null
+      delivery_date: string | null
+      status: string
+      item_count: number
+      grand_total: number
+      item_names: string[]
+    }[]
+    stats: { total_completed: number; total_value: number; avg_order_value: number }
+  }>(`/portal/orders/completed?${q.toString()}`)
+  return {
+    items: body.items.map((o) => ({
+      name: o.name,
+      customerName: o.customer_name,
+      transactionDate: o.transaction_date,
+      deliveryDate: o.delivery_date,
+      status: o.status,
+      itemCount: o.item_count,
+      grandTotal: o.grand_total,
+      itemNames: o.item_names,
+    })),
+    stats: {
+      totalCompleted: body.stats.total_completed,
+      totalValue: body.stats.total_value,
+      avgOrderValue: body.stats.avg_order_value,
+    },
+  }
+}
+
+export async function fetchPortalOrderDetail(name: string): Promise<OrderDetail> {
+  const b = await request<{
+    name: string
+    customer: string
+    customer_name: string | null
+    transaction_date: string | null
+    delivery_date: string | null
+    status: string
+    items: { item_code: string; item_name: string | null; qty: number; rate: number; amount: number }[]
+    sales_team: { sales_person: string; allocated_percentage: number }[]
+    invoice: { name: string; status: string; grand_total: number } | null
+  }>(`/portal/orders/${encodeURIComponent(name)}`)
+  return {
+    name: b.name,
+    customer: b.customer,
+    customerName: b.customer_name,
+    transactionDate: b.transaction_date,
+    deliveryDate: b.delivery_date,
+    status: b.status,
+    items: b.items.map((i) => ({
+      itemCode: i.item_code,
+      itemName: i.item_name,
+      qty: i.qty,
+      rate: i.rate,
+      amount: i.amount,
+    })),
+    salesTeam: b.sales_team.map((s) => ({
+      salesPerson: s.sales_person,
+      allocatedPercentage: s.allocated_percentage,
+    })),
+    invoice: b.invoice
+      ? { name: b.invoice.name, status: b.invoice.status, grandTotal: b.invoice.grand_total }
+      : null,
+  }
+}
+
+export interface ReorderLine {
+  itemCode: string
+  itemName: string | null
+  quantity: number
+  price: number | null
+}
+
+export async function fetchReorderItems(name: string): Promise<ReorderLine[]> {
+  const b = await request<{
+    order_name: string
+    items: { item_code: string; item_name: string | null; quantity: number; price: number | null }[]
+  }>(`/portal/orders/${encodeURIComponent(name)}/reorder`)
+  return b.items.map((i) => ({
+    itemCode: i.item_code,
+    itemName: i.item_name,
+    quantity: i.quantity,
+    price: i.price,
+  }))
+}
+
+export async function cancelPortalOrder(name: string): Promise<void> {
+  await request(`/portal/orders/${encodeURIComponent(name)}/cancel`, { method: 'PUT' })
+}
+
+// --- Track Shipment (Shree Maruti, manual docket) ---------------------
+
+export type TrackState = 'found' | 'pending' | 'error'
+
+export interface TrackEvent {
+  label: string
+  description: string
+  location: string
+  timestamp: string
+  category: string
+  done: boolean
+  current: boolean
+}
+
+export interface TrackShipmentResult {
+  docket: string
+  state: TrackState
+  message: string | null
+  latest: TrackEvent | null
+  events: TrackEvent[]
+  podImages: string[]
+  trackingUrl: string
+}
+
+interface TrackEventBody {
+  label: string
+  description: string
+  location: string
+  timestamp: string
+  category: string
+  done: boolean
+  current: boolean
+}
+
+function mapTrackEvent(e: TrackEventBody): TrackEvent {
+  return {
+    label: e.label,
+    description: e.description,
+    location: e.location,
+    timestamp: e.timestamp,
+    category: e.category,
+    done: e.done,
+    current: e.current,
+  }
+}
+
+export async function fetchTrackShipment(docket: string): Promise<TrackShipmentResult> {
+  const b = await request<{
+    docket: string
+    state: TrackState
+    message: string | null
+    latest: TrackEventBody | null
+    events: TrackEventBody[]
+    pod_images: string[]
+    tracking_url: string
+  }>(`/portal/track-shipment?docket=${encodeURIComponent(docket)}`)
+  return {
+    docket: b.docket,
+    state: b.state,
+    message: b.message,
+    latest: b.latest ? mapTrackEvent(b.latest) : null,
+    events: b.events.map(mapTrackEvent),
+    podImages: b.pod_images,
+    trackingUrl: b.tracking_url,
+  }
 }

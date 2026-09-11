@@ -78,6 +78,19 @@ class Settings(BaseSettings):
     approval_token_ttl_hours: int = 72
     onboarding_token_ttl_hours: int = 168
 
+    # Shree Maruti (innofulfill) Client Booking API — used only for
+    # read-only shipment tracking by manually-entered docket (see
+    # maruti_client.py). Beta base URL by default. clientcode + secretkey
+    # are backend-only; secretkey is used solely for the daily /login and
+    # must never reach the frontend.
+    maruti_base_url: str = "https://bookingapis.innofulfill.com/shipment/clientbookingbeta_v6"
+    maruti_client_code: str = "148874"
+    maruti_secret_key: str = "NOj4wz9LSHCJ"
+    # Public, user-facing tracking page — linked from the Track Shipment
+    # screen. The live SPA reads the docket from `?d=<docket>`
+    # (maruti_service._tracking_url builds the full link).
+    maruti_public_tracking_url: str = "https://tracking.shreemaruti.com"
+
     # SQLite file holding the Portal users table — the only thing in this
     # backend that needs to survive a restart (unlike the in-memory OTP/
     # session stores in auth_service.py).

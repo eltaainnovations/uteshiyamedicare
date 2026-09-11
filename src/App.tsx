@@ -14,11 +14,15 @@ import ForgotPassword from './components/auth/ForgotPassword'
 import Login from './components/auth/Login'
 import ResetPassword from './components/auth/ResetPassword'
 import DashboardPlaceholder from './components/DashboardPlaceholder'
+import DistActiveOrders from './components/distributor/DistActiveOrders'
+import DistCompletedOrders from './components/distributor/DistCompletedOrders'
 import DistEndUsers from './components/distributor/DistEndUsers'
 import DistInventory from './components/distributor/DistInventory'
 import DistProductCatalogue from './components/distributor/DistProductCatalogue'
+import DistProfile from './components/distributor/DistProfile'
 import DistributorDashboard from './components/distributor/DistributorDashboard'
 import DistributorPortal from './components/distributor/DistributorPortal'
+import DistTrackShipment from './components/distributor/DistTrackShipment'
 import Placeholder from './components/layout/Placeholder'
 import { ADMIN_NAV_ITEMS, DISTRIBUTOR_NAV_ITEMS, screenTitle } from './config/navigation'
 import { AuthProvider, useAuth } from './context/AuthContext'
@@ -139,10 +143,18 @@ function AppRoutes() {
                   <DistributorDashboard />
                 ) : item.screen === 'dist-products' ? (
                   <DistProductCatalogue />
+                ) : item.screen === 'dist-active-orders' ? (
+                  <DistActiveOrders />
+                ) : item.screen === 'dist-completed-orders' ? (
+                  <DistCompletedOrders />
                 ) : item.screen === 'dist-inventory' ? (
                   <DistInventory />
                 ) : item.screen === 'dist-end-users' ? (
                   <DistEndUsers />
+                ) : item.screen === 'dist-track' ? (
+                  <DistTrackShipment />
+                ) : item.screen === 'dist-profile' ? (
+                  <DistProfile />
                 ) : (
                   <Placeholder title={screenTitle[item.screen]} />
                 )

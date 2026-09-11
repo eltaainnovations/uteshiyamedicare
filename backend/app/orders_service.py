@@ -92,6 +92,7 @@ async def list_orders(
     search: str | None = None,
     customer: str | None = None,
     status: str | None = None,
+    statuses: list[str] | None = None,
     page: int = 1,
     page_size: int = 20,
 ) -> tuple[list[dict[str, Any]], int, list[str]]:
@@ -100,6 +101,10 @@ async def list_orders(
         filters.append(["customer", "=", customer])
     if status:
         filters.append(["status", "=", status])
+    if statuses:
+        # e.g. the Distributor Portal's "Active" bucket — one filter, so the
+        # list and count calls below stay in agreement.
+        filters.append(["status", "in", statuses])
     if search:
         filters.append(["name", "like", f"%{search}%"])
 
@@ -141,6 +146,73 @@ async def list_orders_in_range(from_date: str, to_date: str, *, customer: str | 
     )
     counts = await _item_counts([o["name"] for o in orders])
     return _shape_order_rows(orders, counts)
+
+
+async def _item_names_by_order(order_names: list[str]) -> dict[str, list[str]]:
+    """item_name list per order — one joined child-table query per chunk,
+    same technique as _item_counts. Backs the Completed Orders screen's
+    "search by item name" and its per-order item summary."""
+    if not order_names:
+        return {}
+    batches = await asyncio.gather(
+        *[
+            erpnext_get_list(
+                "Sales Order",
+                filters=[["name", "in", chunk]],
+                fields=["name", "`tabSales Order Item`.item_name", "`tabSales Order Item`.qty"],
+                limit_page_length=0,
+                use_user_token=True,
+            )
+            for chunk in _chunk(order_names)
+        ]
+    )
+    by_order: dict[str, list[str]] = {}
+    for rows in batches:
+        for row in rows:
+            name = row.get("item_name")
+            if not name:
+                continue
+            qty = float(row.get("qty") or 0)
+            label = f"{name} ×{qty:g}" if qty and qty != 1 else name
+            by_order.setdefault(row["name"], []).append(label)
+    return by_order
+
+
+# The Distributor Portal's "Completed Orders" screen shows both of these
+# terminal, submitted statuses — see the "Closed folds into Completed"
+# decision. "Active" is the in-progress complement.
+COMPLETED_SALES_ORDER_STATUSES = ("Completed", "Closed")
+ACTIVE_SALES_ORDER_STATUSES = ("To Deliver", "To Bill", "To Deliver and Bill")
+
+
+async def completed_orders_summary(
+    from_date: str, to_date: str, *, customer: str
+) -> dict[str, Any]:
+    """Completed + Closed Sales Orders for one distributor in a date range,
+    each with its real line-item list, plus KPI aggregates over the set.
+    Reuses list_orders_in_range for the base fetch — no new ERPNext-calling
+    logic beyond the item-name join."""
+    rows = sorted(
+        (
+            o
+            for o in await list_orders_in_range(from_date, to_date, customer=customer)
+            if o["status"] in COMPLETED_SALES_ORDER_STATUSES
+        ),
+        key=lambda o: (o.get("delivery_date") or o.get("transaction_date") or ""),
+        reverse=True,
+    )
+    names_by_order = await _item_names_by_order([o["name"] for o in rows])
+
+    items = [{**o, "item_names": names_by_order.get(o["name"], [])} for o in rows]
+    total_value = sum(o["grand_total"] for o in rows)
+    return {
+        "items": items,
+        "stats": {
+            "total_completed": len(rows),
+            "total_value": total_value,
+            "avg_order_value": round(total_value / len(rows)) if rows else 0.0,
+        },
+    }
 
 
 async def item_rollup_in_range(
@@ -304,7 +376,7 @@ async def _find_linked_invoice(order_name: str, customer: str) -> dict[str, Any]
     return None
 
 
-async def get_order_detail(name: str) -> dict[str, Any]:
+async def get_order_detail(name: str, *, include_invoice: bool = True) -> dict[str, Any]:
     try:
         order = await erpnext_get_doc("Sales Order", name, use_user_token=True)
     except ERPNextNotFoundError:
@@ -327,7 +399,10 @@ async def get_order_detail(name: str) -> dict[str, Any]:
         }
         for row in order.get("sales_team", [])
     ]
-    invoice = await _find_linked_invoice(order["name"], order["customer"])
+    # The Distributor Portal skips this — the Users-scoped key can't read
+    # Sales Invoice anyway (permission gap), and the screen shows the
+    # invoice column as "Unavailable" statically.
+    invoice = await _find_linked_invoice(order["name"], order["customer"]) if include_invoice else None
 
     return {
         "name": order["name"],

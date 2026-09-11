@@ -664,3 +664,61 @@ class EndUserRecordStats(BaseModel):
 class EndUserRecordListResponse(BaseModel):
     items: list[EndUserRecordOut]
     stats: EndUserRecordStats
+
+
+class PortalCompletedOrderItem(BaseModel):
+    name: str
+    customer_name: str | None
+    transaction_date: str | None
+    delivery_date: str | None
+    status: str  # "Completed" or "Closed"
+    item_count: int
+    grand_total: float
+    item_names: list[str]  # "Item Name ×2" labels, for the multi-item summary + search
+
+
+class PortalCompletedOrdersStats(BaseModel):
+    total_completed: int  # Completed + Closed
+    total_value: float
+    avg_order_value: float
+
+
+class PortalCompletedOrdersResponse(BaseModel):
+    items: list[PortalCompletedOrderItem]
+    stats: PortalCompletedOrdersStats
+
+
+class PortalReorderLine(BaseModel):
+    item_code: str
+    item_name: str | None
+    quantity: float
+    price: float | None  # CURRENT customer-resolved catalogue price, not the historical rate
+
+
+class PortalReorderResponse(BaseModel):
+    order_name: str
+    items: list[PortalReorderLine]
+
+
+class TrackEvent(BaseModel):
+    label: str
+    description: str
+    location: str
+    timestamp: str  # raw string from Shree Maruti, exact format TBD from real data
+    category: str  # "booking" | "traveling" | "delivery" | "" — drives timeline styling
+    done: bool  # a later event exists
+    current: bool  # the most recent event
+
+
+class TrackShipmentOut(BaseModel):
+    docket: str
+    # "found"  -> success:"1", events present
+    # "pending"-> success:"0" + "No tracking information found." (unknown docket
+    #             OR a booking not yet CP-confirmed — we can't tell which)
+    # "error"  -> success:"0" + any other message
+    state: Literal["found", "pending", "error"]
+    message: str | None
+    latest: TrackEvent | None
+    events: list[TrackEvent]
+    pod_images: list[str]
+    tracking_url: str  # public Shree Maruti tracking page for this docket
