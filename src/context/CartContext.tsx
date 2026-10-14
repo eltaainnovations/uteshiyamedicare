@@ -23,6 +23,7 @@ interface CartContextValue {
   add: (line: Omit<CartLine, 'qty'>, qty: number) => void
   setQty: (itemCode: string, qty: number) => void
   remove: (itemCode: string) => void
+  clear: () => void
 }
 
 const CartContext = createContext<CartContextValue | null>(null)
@@ -54,6 +55,8 @@ export function CartProvider({ children }: { children: ReactNode }) {
   const remove: CartContextValue['remove'] = (itemCode) =>
     setItems((prev) => prev.filter((i) => i.itemCode !== itemCode))
 
+  const clear: CartContextValue['clear'] = () => setItems([])
+
   const subtotal = useMemo(() => items.reduce((s, i) => s + i.price * i.qty, 0), [items])
 
   return (
@@ -68,6 +71,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
         add,
         setQty,
         remove,
+        clear,
       }}
     >
       {children}

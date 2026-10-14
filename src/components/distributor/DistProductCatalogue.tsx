@@ -50,7 +50,7 @@ interface ActiveSku {
   stockStatus: StockStatus
 }
 
-function ProductCard({ product }: { product: PortalProduct }) {
+export function ProductCard({ product }: { product: PortalProduct }) {
   const { add, items, openCart } = useCart()
   const [variants, setVariants] = useState<PortalProductVariant[] | null>(
     variantsCache.get(product.itemCode)?.variants ?? null,

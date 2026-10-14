@@ -65,6 +65,30 @@ async def list_distributors(
     return results, total, groups, territories
 
 
+async def list_customers_by_ids(names: list[str]) -> list[dict[str, Any]]:
+    """Customer summary rows for an explicit set of ids — e.g. a Sales
+    Person's linked distributors — rather than list_distributors' paginated
+    sweep across every Customer. Same row shape/fields as list_distributors
+    minus customer_group (not part of the Sales Person "My Customers" view)."""
+    if not names:
+        return []
+    rows = await erpnext_get_list(
+        "Customer",
+        filters=[["name", "in", names]],
+        fields=["name", "customer_name", "territory", "disabled"],
+        limit_page_length=0,
+    )
+    return [
+        {
+            "name": row["name"],
+            "customer_name": row["customer_name"],
+            "territory": row.get("territory"),
+            "disabled": bool(row.get("disabled")),
+        }
+        for row in rows
+    ]
+
+
 async def get_customer_name(name: str) -> str | None:
     """Just the display name for one Customer — the Distributor Portal's
     welcome banner needs the company name and nothing else, so this skips

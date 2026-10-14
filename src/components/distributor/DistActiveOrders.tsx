@@ -14,6 +14,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { cancelPortalOrder, fetchActiveOrders, fetchPortalOrderDetail } from '../../api/portalApi'
 import type { OrderDetail, OrderListItem } from '../../api/ordersApi'
+import { refreshDistributorActiveOrdersBadge } from '../../hooks/useNavBadges'
 import { ApiError } from '../../types/auth'
 import { formatInr } from '../../utils/currency'
 
@@ -154,6 +155,7 @@ export default function DistActiveOrders() {
     setActionError(null)
     try {
       await cancelPortalOrder(name)
+      refreshDistributorActiveOrdersBadge()
       await load()
     } catch (e) {
       setActionError(

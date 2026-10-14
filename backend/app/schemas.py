@@ -245,6 +245,94 @@ class OrderDetailOut(BaseModel):
     invoice: OrderInvoiceOut | None
 
 
+# --- Sales Person: Create Order --------------------------------------------
+
+
+class SalesOrderItemIn(BaseModel):
+    item_code: str
+    qty: float = Field(gt=0)
+
+
+class SalesOrderCreateIn(BaseModel):
+    transaction_date: date
+    delivery_date: date
+    items: list[SalesOrderItemIn] = Field(min_length=1)
+
+
+class SalesOrderCreateOut(BaseModel):
+    name: str
+    status: str
+
+
+# --- Sales Person: My Customers --------------------------------------------
+
+
+class PortalCustomerListItem(BaseModel):
+    name: str
+    customer_name: str
+    territory: str | None
+    disabled: bool
+    last_order_date: str | None
+    total_orders: int
+
+
+class PortalCustomerListResponse(BaseModel):
+    items: list[PortalCustomerListItem]
+
+
+# --- Sales Person: Pending Approvals ---------------------------------------
+
+
+class SalesApprovalOrderOut(BaseModel):
+    name: str
+    customer: str
+    customer_name: str | None
+    item_count: int
+    grand_total: float
+    transaction_date: str | None
+    status: Literal["Awaiting Approval", "Approved", "Rejected"]
+
+
+class SalesApprovalsOut(BaseModel):
+    items: list[SalesApprovalOrderOut]
+    awaiting: int
+    approved: int
+    rejected: int
+
+
+# --- Sales Person: Order History -------------------------------------------
+
+
+class SalesOrderHistoryItemOut(BaseModel):
+    name: str
+    customer: str
+    customer_name: str | None
+    item_count: int
+    grand_total: float
+    transaction_date: str | None
+    status: str  # "Awaiting Approval" / "Rejected" / the real ERPNext status text otherwise
+
+
+class SalesOrderHistoryDistributorOut(BaseModel):
+    name: str
+    customer_name: str
+
+
+class SalesOrderHistoryStats(BaseModel):
+    total: int
+    pending: int
+    approved_and_converted: int
+
+
+class SalesOrderHistoryOut(BaseModel):
+    items: list[SalesOrderHistoryItemOut]
+    total: int
+    page: int
+    page_size: int
+    distributors: list[SalesOrderHistoryDistributorOut]
+    stats: SalesOrderHistoryStats
+
+
 class GenerateReportRequest(BaseModel):
     report_type: ReportType
     from_date: date
@@ -547,6 +635,16 @@ class PortalDashboardOut(BaseModel):
     top_products: list[PortalTopProduct]
 
 
+# --- Sales Person Portal dashboard (routers/portal.py) --------------------
+
+
+class SalesDashboardOut(BaseModel):
+    distributor_count: int  # len(scope.distributor_ids) — 1 today, per the single-linked-distributor simplification
+    orders_created: int  # all-time count of the linked distributor's orders
+    pending_approvals: int
+    recent_orders: list[OrderListItem]
+
+
 class PortalOrderActionResponse(BaseModel):
     name: str
     docstatus: int
@@ -675,6 +773,7 @@ class PortalCompletedOrderItem(BaseModel):
     item_count: int
     grand_total: float
     item_names: list[str]  # "Item Name ×2" labels, for the multi-item summary + search
+    invoice: OrderInvoiceOut | None  # None if no linked Sales Invoice exists yet
 
 
 class PortalCompletedOrdersStats(BaseModel):
@@ -686,6 +785,27 @@ class PortalCompletedOrdersStats(BaseModel):
 class PortalCompletedOrdersResponse(BaseModel):
     items: list[PortalCompletedOrderItem]
     stats: PortalCompletedOrdersStats
+
+
+class PortalInvoiceItem(BaseModel):
+    name: str
+    sales_order: str | None
+    gstin: str | None  # the distributor's own GSTIN (billing_address_gstin), not Uteshiya's
+    posting_date: str | None
+    grand_total: float
+    outstanding_amount: float
+    status: str  # real ERPNext status text — Draft / Overdue / Cancelled / Return / etc.
+
+
+class PortalInvoiceStats(BaseModel):
+    total_invoiced: float
+    pending: float
+    overdue: float
+
+
+class PortalInvoicesResponse(BaseModel):
+    items: list[PortalInvoiceItem]
+    stats: PortalInvoiceStats
 
 
 class PortalReorderLine(BaseModel):

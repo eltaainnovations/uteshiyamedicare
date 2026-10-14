@@ -1,6 +1,7 @@
 import { getStoredToken } from '../context/AuthContext'
 import { ApiError } from '../types/auth'
-import type { OrderDetail, OrderListItem, OrderListPage } from './ordersApi'
+import type { DistributorDetail } from './distributorsApi'
+import type { OrderDetail, OrderInvoice, OrderListItem, OrderListPage } from './ordersApi'
 
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 
@@ -185,12 +186,300 @@ export async function fetchPendingApprovalOrders(): Promise<OrderListItem[]> {
   return body.map(mapOrderRow)
 }
 
+// --- Sales Person Dashboard -----------------------------------------------
+
+export interface SalesDashboard {
+  distributorCount: number
+  ordersCreated: number
+  pendingApprovals: number
+  recentOrders: OrderListItem[]
+}
+
+interface SalesDashboardBody {
+  distributor_count: number
+  orders_created: number
+  pending_approvals: number
+  recent_orders: OrderListItemBody[]
+}
+
+export async function fetchSalesDashboard(): Promise<SalesDashboard> {
+  const b = await request<SalesDashboardBody>('/portal/sales/dashboard')
+  return {
+    distributorCount: b.distributor_count,
+    ordersCreated: b.orders_created,
+    pendingApprovals: b.pending_approvals,
+    recentOrders: b.recent_orders.map(mapOrderRow),
+  }
+}
+
 async function orderAction(name: string, action: 'approve' | 'reject'): Promise<void> {
   await request(`/portal/orders/${encodeURIComponent(name)}/${action}`, { method: 'PUT' })
 }
 
 export const approvePendingOrder = (name: string) => orderAction(name, 'approve')
 export const rejectPendingOrder = (name: string) => orderAction(name, 'reject')
+
+// --- Sales Person: Create Order -------------------------------------------
+
+export interface SalesOrderCreateResult {
+  name: string
+  status: string
+}
+
+export async function createSalesOrder(params: {
+  transactionDate: string
+  deliveryDate: string
+  items: { itemCode: string; qty: number }[]
+}): Promise<SalesOrderCreateResult> {
+  const body = await request<{ name: string; status: string }>('/portal/sales-orders', {
+    method: 'POST',
+    body: JSON.stringify({
+      transaction_date: params.transactionDate,
+      delivery_date: params.deliveryDate,
+      items: params.items.map((i) => ({ item_code: i.itemCode, qty: i.qty })),
+    }),
+  })
+  return { name: body.name, status: body.status }
+}
+
+// --- Sales Person: My Customers --------------------------------------------
+
+export interface PortalCustomerListItem {
+  name: string
+  customerName: string
+  territory: string | null
+  disabled: boolean
+  lastOrderDate: string | null
+  totalOrders: number
+}
+
+interface PortalCustomerListItemBody {
+  name: string
+  customer_name: string
+  territory: string | null
+  disabled: boolean
+  last_order_date: string | null
+  total_orders: number
+}
+
+export async function fetchMyCustomers(): Promise<PortalCustomerListItem[]> {
+  const body = await request<{ items: PortalCustomerListItemBody[] }>('/portal/customers')
+  return body.items.map((c) => ({
+    name: c.name,
+    customerName: c.customer_name,
+    territory: c.territory,
+    disabled: c.disabled,
+    lastOrderDate: c.last_order_date,
+    totalOrders: c.total_orders,
+  }))
+}
+
+interface PortalCustomerDetailBody {
+  name: string
+  customer_name: string
+  customer_group: string | null
+  territory: string | null
+  customer_type: string | null
+  disabled: boolean
+  addresses: {
+    name: string
+    address_type: string | null
+    address_line1: string | null
+    address_line2: string | null
+    city: string | null
+    state: string | null
+    country: string | null
+    pincode: string | null
+    is_primary_address: boolean
+    is_shipping_address: boolean
+  }[]
+  contacts: {
+    name: string
+    first_name: string | null
+    last_name: string | null
+    email_id: string | null
+    phone: string | null
+    mobile_no: string | null
+  }[]
+}
+
+// Same Customer + Address + Contact shape Admin's fetchDistributorDetail
+// returns (backend reuses distributors_service.get_distributor_detail
+// verbatim) — just fetched through the Sales-Person-scoped endpoint.
+export async function fetchMyCustomerDetail(name: string): Promise<DistributorDetail> {
+  const body = await request<PortalCustomerDetailBody>(`/portal/customers/${encodeURIComponent(name)}`)
+  return {
+    name: body.name,
+    customerName: body.customer_name,
+    customerGroup: body.customer_group,
+    territory: body.territory,
+    customerType: body.customer_type,
+    disabled: body.disabled,
+    addresses: body.addresses.map((a) => ({
+      name: a.name,
+      addressType: a.address_type,
+      addressLine1: a.address_line1,
+      addressLine2: a.address_line2,
+      city: a.city,
+      state: a.state,
+      country: a.country,
+      pincode: a.pincode,
+      isPrimaryAddress: a.is_primary_address,
+      isShippingAddress: a.is_shipping_address,
+    })),
+    contacts: body.contacts.map((c) => ({
+      name: c.name,
+      firstName: c.first_name,
+      lastName: c.last_name,
+      emailId: c.email_id,
+      phone: c.phone,
+      mobileNo: c.mobile_no,
+    })),
+  }
+}
+
+// --- Sales Person: Pending Approvals ---------------------------------------
+
+export type SalesApprovalStatus = 'Awaiting Approval' | 'Approved' | 'Rejected'
+
+export interface SalesApprovalOrder {
+  name: string
+  customer: string
+  customerName: string | null
+  itemCount: number
+  grandTotal: number
+  transactionDate: string | null
+  status: SalesApprovalStatus
+}
+
+export interface SalesApprovals {
+  items: SalesApprovalOrder[]
+  awaiting: number
+  approved: number
+  rejected: number
+}
+
+interface SalesApprovalOrderBody {
+  name: string
+  customer: string
+  customer_name: string | null
+  item_count: number
+  grand_total: number
+  transaction_date: string | null
+  status: SalesApprovalStatus
+}
+
+export async function fetchSalesApprovals(): Promise<SalesApprovals> {
+  const body = await request<{ items: SalesApprovalOrderBody[]; awaiting: number; approved: number; rejected: number }>(
+    '/portal/sales/approvals',
+  )
+  return {
+    items: body.items.map((o) => ({
+      name: o.name,
+      customer: o.customer,
+      customerName: o.customer_name,
+      itemCount: o.item_count,
+      grandTotal: o.grand_total,
+      transactionDate: o.transaction_date,
+      status: o.status,
+    })),
+    awaiting: body.awaiting,
+    approved: body.approved,
+    rejected: body.rejected,
+  }
+}
+
+// --- Sales Person: Order History -------------------------------------------
+
+export interface SalesOrderHistoryItem {
+  name: string
+  customer: string
+  customerName: string | null
+  itemCount: number
+  grandTotal: number
+  transactionDate: string | null
+  status: string
+}
+
+export interface SalesOrderHistoryDistributor {
+  name: string
+  customerName: string
+}
+
+export interface SalesOrderHistoryStats {
+  total: number
+  pending: number
+  approvedAndConverted: number
+}
+
+export interface SalesOrderHistory {
+  items: SalesOrderHistoryItem[]
+  total: number
+  page: number
+  pageSize: number
+  distributors: SalesOrderHistoryDistributor[]
+  stats: SalesOrderHistoryStats
+}
+
+interface SalesOrderHistoryBody {
+  items: {
+    name: string
+    customer: string
+    customer_name: string | null
+    item_count: number
+    grand_total: number
+    transaction_date: string | null
+    status: string
+  }[]
+  total: number
+  page: number
+  page_size: number
+  distributors: { name: string; customer_name: string }[]
+  stats: { total: number; pending: number; approved_and_converted: number }
+}
+
+export async function fetchSalesOrderHistory(
+  params: {
+    search?: string
+    status?: string
+    customer?: string
+    fromDate?: string
+    toDate?: string
+    page?: number
+    pageSize?: number
+  } = {},
+): Promise<SalesOrderHistory> {
+  const query = new URLSearchParams()
+  if (params.search) query.set('search', params.search)
+  if (params.status) query.set('status', params.status)
+  if (params.customer) query.set('customer', params.customer)
+  if (params.fromDate) query.set('from_date', params.fromDate)
+  if (params.toDate) query.set('to_date', params.toDate)
+  query.set('page', String(params.page ?? 1))
+  query.set('page_size', String(params.pageSize ?? 20))
+
+  const body = await request<SalesOrderHistoryBody>(`/portal/sales/orders?${query.toString()}`)
+  return {
+    items: body.items.map((o) => ({
+      name: o.name,
+      customer: o.customer,
+      customerName: o.customer_name,
+      itemCount: o.item_count,
+      grandTotal: o.grand_total,
+      transactionDate: o.transaction_date,
+      status: o.status,
+    })),
+    total: body.total,
+    page: body.page,
+    pageSize: body.page_size,
+    distributors: body.distributors.map((d) => ({ name: d.name, customerName: d.customer_name })),
+    stats: {
+      total: body.stats.total,
+      pending: body.stats.pending,
+      approvedAndConverted: body.stats.approved_and_converted,
+    },
+  }
+}
 
 // --- Distributor Product Catalogue ---------------------------------------
 
@@ -589,6 +878,7 @@ export interface CompletedOrder {
   itemCount: number
   grandTotal: number
   itemNames: string[]
+  invoice: OrderInvoice | null
 }
 
 export interface CompletedOrdersStats {
@@ -612,6 +902,7 @@ export async function fetchCompletedOrders(range: {
       item_count: number
       grand_total: number
       item_names: string[]
+      invoice: { name: string; status: string; grand_total: number } | null
     }[]
     stats: { total_completed: number; total_value: number; avg_order_value: number }
   }>(`/portal/orders/completed?${q.toString()}`)
@@ -625,11 +916,98 @@ export async function fetchCompletedOrders(range: {
       itemCount: o.item_count,
       grandTotal: o.grand_total,
       itemNames: o.item_names,
+      invoice: o.invoice ? { name: o.invoice.name, status: o.invoice.status, grandTotal: o.invoice.grand_total } : null,
     })),
     stats: {
       totalCompleted: body.stats.total_completed,
       totalValue: body.stats.total_value,
       avgOrderValue: body.stats.avg_order_value,
+    },
+  }
+}
+
+// Proxied through our backend, which holds the ERPNext credentials — the
+// browser only ever gets a PDF blob, never a token to call ERPNext itself.
+// Downloaded via fetch (not a plain <a href>) because the request needs
+// our own Authorization header.
+export async function downloadInvoicePdf(orderName: string): Promise<void> {
+  const token = getStoredToken()
+  let response: Response
+  try {
+    response = await fetch(`${API_URL}/portal/orders/${encodeURIComponent(orderName)}/invoice-pdf`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    })
+  } catch {
+    throw new ApiError(0, 'Could not reach the server. Check your connection and try again.')
+  }
+
+  if (!response.ok) {
+    let detail = 'Could not download the invoice.'
+    try {
+      const body = (await response.json()) as { detail?: string }
+      if (body.detail) detail = body.detail
+    } catch {
+      // no JSON body — keep the generic message
+    }
+    throw new ApiError(response.status, detail)
+  }
+
+  const disposition = response.headers.get('content-disposition') ?? ''
+  const filename = /filename="?([^"]+)"?/.exec(disposition)?.[1] ?? `${orderName}-invoice.pdf`
+  const blob = await response.blob()
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
+
+export interface PortalInvoice {
+  name: string
+  salesOrder: string | null
+  gstin: string | null
+  postingDate: string | null
+  grandTotal: number
+  outstandingAmount: number
+  status: string
+}
+
+export interface PortalInvoiceStats {
+  totalInvoiced: number
+  pending: number
+  overdue: number
+}
+
+export async function fetchPortalInvoices(): Promise<{ items: PortalInvoice[]; stats: PortalInvoiceStats }> {
+  const body = await request<{
+    items: {
+      name: string
+      sales_order: string | null
+      gstin: string | null
+      posting_date: string | null
+      grand_total: number
+      outstanding_amount: number
+      status: string
+    }[]
+    stats: { total_invoiced: number; pending: number; overdue: number }
+  }>('/portal/invoices')
+  return {
+    items: body.items.map((i) => ({
+      name: i.name,
+      salesOrder: i.sales_order,
+      gstin: i.gstin,
+      postingDate: i.posting_date,
+      grandTotal: i.grand_total,
+      outstandingAmount: i.outstanding_amount,
+      status: i.status,
+    })),
+    stats: {
+      totalInvoiced: body.stats.total_invoiced,
+      pending: body.stats.pending,
+      overdue: body.stats.overdue,
     },
   }
 }

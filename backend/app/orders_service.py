@@ -1,14 +1,14 @@
-"""Read-only Orders screen backed directly by ERPNext's Sales Order (and,
-where permitted, Sales Invoice) doctypes — no local storage, no caching.
-Mirrors distributors_service.py's shape.
+"""Read-only Orders screen backed directly by ERPNext's Sales Order and
+Sales Invoice doctypes — no local storage, no caching. Mirrors
+distributors_service.py's shape.
 
-Uses the Users-scoped token (use_user_token=True), not the catalogue key —
-per the API doc, this key's Sales Invoice read access is currently
-blocked by an ERPNext-side Role Permissions Manager gap (confirmed via a
-live 403: "portal@uteshiyamedicare.com does not have doctype access...
-for document Sales Invoice"). That's flagged back to Uteshiya, not
-worked around here — _find_linked_invoice degrades to None instead of
-raising, so the rest of an order's detail still loads.
+Uses the Users-scoped token (use_user_token=True), not the catalogue key.
+Sales Invoice read access was blocked by an ERPNext-side Role Permissions
+Manager gap until 2026-09-29 (confirmed fixed live: real invoice data now
+reads correctly, including the items[].sales_order link back to the
+originating Sales Order) — _find_linked_invoice/outstanding_for_customer
+still degrade to None/unavailable on any ERPNextUnavailableError, but
+that's just the normal transient-failure path now, not a standing gap.
 """
 
 import asyncio
@@ -18,6 +18,7 @@ from typing import Any
 from .erpnext_client import (
     ERPNextNotFoundError,
     ERPNextUnavailableError,
+    erpnext_delete_doc,
     erpnext_get_count,
     erpnext_get_doc,
     erpnext_get_list,
@@ -93,6 +94,8 @@ async def list_orders(
     customer: str | None = None,
     status: str | None = None,
     statuses: list[str] | None = None,
+    from_date: str | None = None,
+    to_date: str | None = None,
     page: int = 1,
     page_size: int = 20,
 ) -> tuple[list[dict[str, Any]], int, list[str]]:
@@ -107,6 +110,10 @@ async def list_orders(
         filters.append(["status", "in", statuses])
     if search:
         filters.append(["name", "like", f"%{search}%"])
+    if from_date:
+        filters.append(["transaction_date", ">=", from_date])
+    if to_date:
+        filters.append(["transaction_date", "<=", to_date])
 
     orders, total, statuses = await asyncio.gather(
         erpnext_get_list(
@@ -201,9 +208,15 @@ async def completed_orders_summary(
         key=lambda o: (o.get("delivery_date") or o.get("transaction_date") or ""),
         reverse=True,
     )
-    names_by_order = await _item_names_by_order([o["name"] for o in rows])
+    names_by_order, invoices = await asyncio.gather(
+        _item_names_by_order([o["name"] for o in rows]),
+        asyncio.gather(*[_find_linked_invoice(o["name"], customer) for o in rows]),
+    )
 
-    items = [{**o, "item_names": names_by_order.get(o["name"], [])} for o in rows]
+    items = [
+        {**o, "item_names": names_by_order.get(o["name"], []), "invoice": invoice}
+        for o, invoice in zip(rows, invoices)
+    ]
     total_value = sum(o["grand_total"] for o in rows)
     return {
         "items": items,
@@ -283,6 +296,29 @@ async def first_order_dates() -> dict[str, str]:
     return {row["customer"]: row["first_date"] for row in rows if row.get("first_date")}
 
 
+async def order_stats_by_customer(customer_ids: list[str]) -> dict[str, dict[str, Any]]:
+    """Per-customer {total_orders, last_order_date} — one grouped query
+    scoped to the given ids (e.g. a Sales Person's linked distributors),
+    all-time and counting every order regardless of who created it, not
+    just this doctype's sales_team. Mirrors first_order_dates()'s
+    aggregate-query shape, just filtered instead of run across every
+    Customer in the system."""
+    if not customer_ids:
+        return {}
+    rows = await erpnext_get_list(
+        "Sales Order",
+        filters=[["customer", "in", customer_ids]],
+        fields=["customer", "count(name) as total_orders", "max(transaction_date) as last_order_date"],
+        group_by="customer",
+        limit_page_length=0,
+        use_user_token=True,
+    )
+    return {
+        row["customer"]: {"total_orders": int(row["total_orders"]), "last_order_date": row.get("last_order_date")}
+        for row in rows
+    }
+
+
 async def list_pending_approval_orders(customer: str) -> list[dict[str, Any]]:
     """Draft (docstatus=0) Sales Orders for one Customer — the distributor-
     approval queue. Same row shape as list_orders; `customer` is always the
@@ -315,13 +351,36 @@ async def set_order_docstatus(name: str, docstatus: int, *, expected_customer: s
     await erpnext_update_doc("Sales Order", name, {"docstatus": docstatus}, use_user_token=True)
 
 
+async def delete_draft_order(name: str, *, expected_customer: str) -> None:
+    """Permanently deletes a still-draft (docstatus=0) Sales Order — the
+    Reject action on the Pending Approvals queue.
+
+    A real delete, not a docstatus change: confirmed live that ERPNext's
+    document lifecycle only allows Draft (0) -> Submitted (1) -> Cancelled
+    (2) — cancelling a still-draft order (0 -> 2 directly) raises
+    frappe.exceptions.DocstatusTransitionError. A draft that's rejected
+    has nothing to cancel, it can only be deleted outright.
+
+    Verifies docstatus==0 and that the order belongs to expected_customer
+    before deleting — same defence-in-depth shape as set_order_docstatus.
+    Raises ERPNextNotFoundError if the order is missing, not theirs, or
+    no longer a draft — deliberately the same error for all three so a
+    caller can't distinguish "not yours" from "doesn't exist" from
+    "already submitted" by probing.
+    """
+    order = await erpnext_get_doc("Sales Order", name, use_user_token=True)
+    if order.get("customer") != expected_customer or order.get("docstatus") != 0:
+        raise ERPNextNotFoundError(f"Sales Order {name} not found")
+    await erpnext_delete_doc("Sales Order", name, use_user_token=True)
+
+
 async def outstanding_for_customer(customer: str) -> dict[str, Any]:
     """Total unpaid Sales Invoice value + overdue count for one Customer.
 
-    KNOWN GAP: the Users-scoped key currently has no Sales Invoice read
-    permission at all (see module docstring), so this degrades to zeros
-    with available=False rather than raising — the KPI card shows
-    "unavailable" until Uteshiya grants the permission.
+    Sales Invoice read is confirmed working as of 2026-09-29 (see module
+    docstring) — this still degrades to zeros with available=False on
+    ERPNextUnavailableError, but that's now just the normal transient-
+    failure path, not a standing permission gap.
     """
     try:
         invoices = await erpnext_get_list(
@@ -345,11 +404,11 @@ async def outstanding_for_customer(customer: str) -> dict[str, Any]:
 
 
 async def _find_linked_invoice(order_name: str, customer: str) -> dict[str, Any] | None:
-    """Best-effort match against Sales Invoice.items[].sales_order (the
-    standard ERPNext child-row link back to the originating order) —
-    unverified against real data, since the Users-scoped key currently
-    has no Sales Invoice read permission at all. Any failure here
-    (permission or otherwise) degrades to None rather than failing the
+    """Match against Sales Invoice.items[].sales_order (the standard
+    ERPNext child-row link back to the originating order) — confirmed
+    live against real data as of 2026-09-29: each invoice's items[]
+    reliably carries a single sales_order value. Any failure here
+    (transient ERPNext error) degrades to None rather than failing the
     whole order detail."""
     try:
         invoices = await erpnext_get_list(

@@ -1,6 +1,7 @@
 import { CheckCircle, Eye, FileText, Lock, RotateCcw, Search, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import {
+  downloadInvoicePdf,
   fetchCompletedOrders,
   fetchPortalOrderDetail,
   fetchReorderItems,
@@ -122,6 +123,8 @@ export default function DistCompletedOrders() {
   const [detailName, setDetailName] = useState<string | null>(null)
   const [reordered, setReordered] = useState<Set<string>>(new Set())
   const [reordering, setReordering] = useState<string | null>(null)
+  const [downloadingInvoice, setDownloadingInvoice] = useState<string | null>(null)
+  const [downloadError, setDownloadError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -172,6 +175,18 @@ export default function DistCompletedOrders() {
       /* surfaced by the button staying in its normal state */
     } finally {
       setReordering(null)
+    }
+  }
+
+  async function handleDownloadInvoice(name: string) {
+    setDownloadingInvoice(name)
+    setDownloadError(null)
+    try {
+      await downloadInvoicePdf(name)
+    } catch (e) {
+      setDownloadError(e instanceof ApiError ? e.message : 'Could not download the invoice.')
+    } finally {
+      setDownloadingInvoice(null)
     }
   }
 
@@ -242,6 +257,12 @@ export default function DistCompletedOrders() {
         )}
       </div>
 
+      {downloadError && (
+        <p className="text-xs text-red-600 bg-red-50 dark:bg-[rgba(220,38,38,0.1)] rounded-[8px] px-3 py-2">
+          {downloadError}
+        </p>
+      )}
+
       <div className="bg-white dark:bg-[#1A1D2E] rounded-[12px] border border-gray-100 dark:border-[#252836] shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
@@ -297,8 +318,12 @@ export default function DistCompletedOrders() {
                     <td className="px-5 py-3.5 text-xs font-bold text-gray-900 dark:text-[#E8EAF0] whitespace-nowrap">
                       {formatInr(o.grandTotal)}
                     </td>
-                    <td className="px-5 py-3.5 text-xs text-gray-400 dark:text-[#5A6075] whitespace-nowrap italic">
-                      Unavailable
+                    <td className="px-5 py-3.5 text-xs whitespace-nowrap">
+                      {o.invoice ? (
+                        <span className="font-mono font-semibold text-[#147BA6]">{o.invoice.name}</span>
+                      ) : (
+                        <span className="text-gray-400 dark:text-[#5A6075] italic">Not invoiced yet</span>
+                      )}
                     </td>
                     <td className="px-5 py-3.5">
                       <StatusBadge status={o.status} />
@@ -319,9 +344,14 @@ export default function DistCompletedOrders() {
                           {reordered.has(o.name) ? 'Added' : reordering === o.name ? 'Adding…' : 'Reorder'}
                         </button>
                         <button
-                          disabled
-                          title="Invoice download unavailable — Sales Invoice access pending"
-                          className="w-7 h-7 flex items-center justify-center rounded-[6px] text-gray-300 dark:text-[#3A3F52] cursor-not-allowed"
+                          onClick={() => handleDownloadInvoice(o.name)}
+                          disabled={!o.invoice || downloadingInvoice === o.name}
+                          title={o.invoice ? 'Download invoice' : 'No invoice available for this order yet'}
+                          className={`w-7 h-7 flex items-center justify-center rounded-[6px] transition ${
+                            o.invoice
+                              ? 'text-gray-400 hover:text-[#147BA6] hover:bg-[#e8f4fa] dark:hover:bg-[rgba(20,123,166,0.15)]'
+                              : 'text-gray-300 dark:text-[#3A3F52] cursor-not-allowed'
+                          } disabled:opacity-60`}
                         >
                           <FileText size={13} />
                         </button>
