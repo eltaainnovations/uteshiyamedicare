@@ -51,6 +51,13 @@ class MessageResponse(BaseModel):
     detail: str
 
 
+def _validate_customer_link(role: Role, link: str | None) -> None:
+    """Shared by CreatePortalUserRequest and LinkExistingUserRequest so the
+    rule can't drift between the two entry points."""
+    if role in ("distributor", "sales_person") and not link:
+        raise ValueError("erpnext_customer_link is required for distributor and sales_person roles")
+
+
 class CreatePortalUserRequest(BaseModel):
     email: EmailStr
     first_name: str = Field(min_length=1)
@@ -60,8 +67,22 @@ class CreatePortalUserRequest(BaseModel):
 
     @model_validator(mode="after")
     def _require_customer_link_for_field_roles(self) -> "CreatePortalUserRequest":
-        if self.portal_role in ("distributor", "sales_person") and not self.erpnext_customer_link:
-            raise ValueError("erpnext_customer_link is required for distributor and sales_person roles")
+        _validate_customer_link(self.portal_role, self.erpnext_customer_link)
+        return self
+
+
+class LinkExistingUserRequest(BaseModel):
+    """No first_name/last_name — the ERPNext user already exists, so
+    users_service.link_existing_user pulls those from ERPNext instead of
+    asking the admin to retype them."""
+
+    email: EmailStr
+    portal_role: Role
+    erpnext_customer_link: str | None = None
+
+    @model_validator(mode="after")
+    def _require_customer_link_for_field_roles(self) -> "LinkExistingUserRequest":
+        _validate_customer_link(self.portal_role, self.erpnext_customer_link)
         return self
 
 
@@ -222,6 +243,94 @@ class OrderDetailOut(BaseModel):
     items: list[OrderItemOut]
     sales_team: list[OrderSalesPersonOut]
     invoice: OrderInvoiceOut | None
+
+
+# --- Sales Person: Create Order --------------------------------------------
+
+
+class SalesOrderItemIn(BaseModel):
+    item_code: str
+    qty: float = Field(gt=0)
+
+
+class SalesOrderCreateIn(BaseModel):
+    transaction_date: date
+    delivery_date: date
+    items: list[SalesOrderItemIn] = Field(min_length=1)
+
+
+class SalesOrderCreateOut(BaseModel):
+    name: str
+    status: str
+
+
+# --- Sales Person: My Customers --------------------------------------------
+
+
+class PortalCustomerListItem(BaseModel):
+    name: str
+    customer_name: str
+    territory: str | None
+    disabled: bool
+    last_order_date: str | None
+    total_orders: int
+
+
+class PortalCustomerListResponse(BaseModel):
+    items: list[PortalCustomerListItem]
+
+
+# --- Sales Person: Pending Approvals ---------------------------------------
+
+
+class SalesApprovalOrderOut(BaseModel):
+    name: str
+    customer: str
+    customer_name: str | None
+    item_count: int
+    grand_total: float
+    transaction_date: str | None
+    status: Literal["Awaiting Approval", "Approved", "Rejected"]
+
+
+class SalesApprovalsOut(BaseModel):
+    items: list[SalesApprovalOrderOut]
+    awaiting: int
+    approved: int
+    rejected: int
+
+
+# --- Sales Person: Order History -------------------------------------------
+
+
+class SalesOrderHistoryItemOut(BaseModel):
+    name: str
+    customer: str
+    customer_name: str | None
+    item_count: int
+    grand_total: float
+    transaction_date: str | None
+    status: str  # "Awaiting Approval" / "Rejected" / the real ERPNext status text otherwise
+
+
+class SalesOrderHistoryDistributorOut(BaseModel):
+    name: str
+    customer_name: str
+
+
+class SalesOrderHistoryStats(BaseModel):
+    total: int
+    pending: int
+    approved_and_converted: int
+
+
+class SalesOrderHistoryOut(BaseModel):
+    items: list[SalesOrderHistoryItemOut]
+    total: int
+    page: int
+    page_size: int
+    distributors: list[SalesOrderHistoryDistributorOut]
+    stats: SalesOrderHistoryStats
 
 
 class GenerateReportRequest(BaseModel):
@@ -413,3 +522,323 @@ class PasswordResetRequest(BaseModel):
 class ChangePasswordRequest(BaseModel):
     current_password: str = Field(min_length=1)
     new_password: str = Field(min_length=1)
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str = Field(min_length=1)
+    new_password: str = Field(min_length=1)
+
+
+OfferStatus = Literal["Active", "Scheduled", "Expired"]
+
+
+class OfferProductOut(BaseModel):
+    item_code: str
+    item_name: str
+
+
+class OfferWrite(BaseModel):
+    """Shared body for POST /offers and PUT /offers/{id}."""
+
+    title: str = Field(min_length=1)
+    description: str = ""
+    discount_percent: float = Field(default=0, ge=0, le=100)
+    start_date: date
+    end_date: date
+    applies_to_all: bool = False
+    product_item_codes: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _check(self) -> "OfferWrite":
+        if self.end_date < self.start_date:
+            raise ValueError("End date must be on or after the start date.")
+        if self.applies_to_all and self.product_item_codes:
+            raise ValueError("Clear the product list when the offer applies to all products.")
+        if not self.applies_to_all and not self.product_item_codes:
+            raise ValueError("Add at least one product, or turn on \"Applies to all products\".")
+        return self
+
+
+class OfferOut(BaseModel):
+    id: int
+    title: str
+    description: str
+    discount_percent: float
+    start_date: date
+    end_date: date
+    applies_to_all: bool
+    product_item_codes: list[str]
+    products: list[OfferProductOut]
+    status: OfferStatus  # computed from today's date, never stored
+    created_at: str
+    updated_at: str
+
+
+class ActiveOfferOut(BaseModel):
+    """Trimmed shape for the Distributor Portal — no status (all Active by
+    definition) and no admin-only timestamps."""
+
+    id: int
+    title: str
+    description: str
+    discount_percent: float
+    end_date: date
+    applies_to_all: bool
+    product_item_codes: list[str]
+    products: list[OfferProductOut]
+
+
+# --- Distributor Portal dashboard (routers/portal.py) ---------------------
+
+
+class PortalWelcome(BaseModel):
+    name: str  # the person (portal user's own name)
+    company: str | None  # linked ERPNext Customer's display name
+    customer_id: str
+
+
+class PortalKpis(BaseModel):
+    total_orders: int
+    pending_orders: int
+    pending_value: float
+    completed_orders: int
+    fulfillment_pct: float | None
+    total_purchase_value: float
+    outstanding_amount: float
+    overdue_invoice_count: int
+    outstanding_available: bool  # false = Sales Invoice read not yet permitted
+
+
+class PortalTrendPoint(BaseModel):
+    bucket: str  # "YYYY-MM"
+    value: float
+    orders: int
+
+
+class PortalStatusSlice(BaseModel):
+    status: str
+    count: int
+
+
+class PortalTopProduct(BaseModel):
+    item_code: str
+    item_name: str | None
+    qty: float
+    revenue: float
+
+
+class PortalDashboardOut(BaseModel):
+    welcome: PortalWelcome
+    kpis: PortalKpis
+    monthly_trend: list[PortalTrendPoint]
+    order_status: list[PortalStatusSlice]
+    top_products: list[PortalTopProduct]
+
+
+# --- Sales Person Portal dashboard (routers/portal.py) --------------------
+
+
+class SalesDashboardOut(BaseModel):
+    distributor_count: int  # len(scope.distributor_ids) — 1 today, per the single-linked-distributor simplification
+    orders_created: int  # all-time count of the linked distributor's orders
+    pending_approvals: int
+    recent_orders: list[OrderListItem]
+
+
+class PortalOrderActionResponse(BaseModel):
+    name: str
+    docstatus: int
+    detail: str
+
+
+StockStatus = Literal["in_stock", "low_stock", "out_of_stock"]
+
+
+class PortalProductListItem(BaseModel):
+    item_code: str
+    item_name: str
+    item_group: str
+    has_variants: bool
+    image: str | None  # ERPNext Item.image; null on every item on this instance today
+    total_stock: int  # sum of Bin.projected_qty across warehouses (variants rolled up)
+    stock_status: StockStatus
+    price: float | None  # customer-scoped rate, falling back to list_price
+    list_price: float | None  # general price-list rate, for the struck-through MRP
+
+
+class PortalProductListResponse(BaseModel):
+    items: list[PortalProductListItem]
+    total: int
+    page: int
+    page_size: int
+    categories: list[str]
+
+
+class PortalProductVariant(BaseModel):
+    item_code: str
+    item_name: str
+    total_stock: int
+    stock_status: StockStatus
+    price: float | None
+    list_price: float | None
+    attributes: list[ProductAttributeOut]
+
+
+class PortalProductVariantsOut(BaseModel):
+    item_code: str
+    item_name: str
+    has_variants: bool
+    image: str | None
+    variants: list[PortalProductVariant]
+
+
+class PortalInventoryItem(BaseModel):
+    item_code: str
+    item_name: str
+    category: str | None  # ERPNext item_group
+    unit: str | None  # ERPNext stock_uom
+    quantity: int
+    low_stock_threshold: int | None
+    low_stock: bool  # threshold set and quantity <= threshold
+    value: float | None  # quantity × this distributor's resolved price
+    updated_at: str
+
+
+class PortalInventoryResponse(BaseModel):
+    items: list[PortalInventoryItem]
+
+
+class PortalThresholdUpdate(BaseModel):
+    # null clears the threshold (no reorder alert for this item)
+    low_stock_threshold: int | None = Field(default=None, ge=0)
+
+
+class EndUserRecordCreate(BaseModel):
+    item_code: str = Field(min_length=1)
+    quantity: int = Field(gt=0)
+    doctor_name: str = Field(min_length=1)
+    hospital_name: str = Field(min_length=1)
+    location: str = Field(min_length=1)
+    batch_id: str = Field(min_length=1)
+    implantation_date: date
+    # Optional at creation — post-op feedback is filled in later.
+    feedback_notes: str | None = None
+    satisfaction_rating: int | None = Field(default=None, ge=1, le=5)
+    complication: bool = False
+
+
+class EndUserRecordFeedbackUpdate(BaseModel):
+    feedback_notes: str | None = None
+    satisfaction_rating: int | None = Field(default=None, ge=1, le=5)
+    complication: bool = False
+
+
+class EndUserRecordOut(BaseModel):
+    id: int
+    record_id: str  # "EUR-0001"
+    item_code: str
+    item_name: str
+    quantity: int
+    doctor_name: str
+    hospital_name: str
+    location: str
+    batch_id: str
+    implantation_date: str
+    feedback_notes: str | None
+    satisfaction_rating: int | None
+    complication: bool
+    has_feedback: bool
+    created_at: str
+
+
+class EndUserRecordStats(BaseModel):
+    total_records: int
+    top_hospital: str | None
+    top_hospital_count: int
+    avg_satisfaction: float | None
+    complication_alerts: int
+
+
+class EndUserRecordListResponse(BaseModel):
+    items: list[EndUserRecordOut]
+    stats: EndUserRecordStats
+
+
+class PortalCompletedOrderItem(BaseModel):
+    name: str
+    customer_name: str | None
+    transaction_date: str | None
+    delivery_date: str | None
+    status: str  # "Completed" or "Closed"
+    item_count: int
+    grand_total: float
+    item_names: list[str]  # "Item Name ×2" labels, for the multi-item summary + search
+    invoice: OrderInvoiceOut | None  # None if no linked Sales Invoice exists yet
+
+
+class PortalCompletedOrdersStats(BaseModel):
+    total_completed: int  # Completed + Closed
+    total_value: float
+    avg_order_value: float
+
+
+class PortalCompletedOrdersResponse(BaseModel):
+    items: list[PortalCompletedOrderItem]
+    stats: PortalCompletedOrdersStats
+
+
+class PortalInvoiceItem(BaseModel):
+    name: str
+    sales_order: str | None
+    gstin: str | None  # the distributor's own GSTIN (billing_address_gstin), not Uteshiya's
+    posting_date: str | None
+    grand_total: float
+    outstanding_amount: float
+    status: str  # real ERPNext status text — Draft / Overdue / Cancelled / Return / etc.
+
+
+class PortalInvoiceStats(BaseModel):
+    total_invoiced: float
+    pending: float
+    overdue: float
+
+
+class PortalInvoicesResponse(BaseModel):
+    items: list[PortalInvoiceItem]
+    stats: PortalInvoiceStats
+
+
+class PortalReorderLine(BaseModel):
+    item_code: str
+    item_name: str | None
+    quantity: float
+    price: float | None  # CURRENT customer-resolved catalogue price, not the historical rate
+
+
+class PortalReorderResponse(BaseModel):
+    order_name: str
+    items: list[PortalReorderLine]
+
+
+class TrackEvent(BaseModel):
+    label: str
+    description: str
+    location: str
+    timestamp: str  # raw string from Shree Maruti, exact format TBD from real data
+    category: str  # "booking" | "traveling" | "delivery" | "" — drives timeline styling
+    done: bool  # a later event exists
+    current: bool  # the most recent event
+
+
+class TrackShipmentOut(BaseModel):
+    docket: str
+    # "found"  -> success:"1", events present
+    # "pending"-> success:"0" + "No tracking information found." (unknown docket
+    #             OR a booking not yet CP-confirmed — we can't tell which)
+    # "error"  -> success:"0" + any other message
+    state: Literal["found", "pending", "error"]
+    message: str | None
+    latest: TrackEvent | None
+    events: list[TrackEvent]
+    pod_images: list[str]
+    tracking_url: str  # public Shree Maruti tracking page for this docket

@@ -3,9 +3,8 @@ import { useEffect, useState } from 'react'
 import { fetchOrderDetail, fetchOrders, type OrderDetail, type OrderListItem } from '../../api/ordersApi'
 import { ApiError } from '../../types/auth'
 import DistributorTypeahead from '../common/DistributorTypeahead'
+import PageSizeSelect from '../common/PageSizeSelect'
 import Pagination from '../common/Pagination'
-
-const PAGE_SIZE = 20
 
 const STATUS_BADGE_CLS: Record<string, string> = {
   Draft: 'text-gray-500 bg-gray-100 dark:bg-[#252836] dark:text-[#8892A4]',
@@ -29,6 +28,7 @@ export default function Orders() {
   const [customerLabel, setCustomerLabel] = useState<string | null>(null)
   const [status, setStatus] = useState('All')
   const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(20)
 
   const [items, setItems] = useState<OrderListItem[]>([])
   const [total, setTotal] = useState(0)
@@ -46,10 +46,10 @@ export default function Orders() {
     return () => window.clearTimeout(t)
   }, [searchInput])
 
-  // Any filter change invalidates the current page number.
+  // Any filter/page-size change invalidates the current page number.
   useEffect(() => {
     setPage(1)
-  }, [search, customer, status])
+  }, [search, customer, status, pageSize])
 
   useEffect(() => {
     let cancelled = false
@@ -60,7 +60,7 @@ export default function Orders() {
       customer: customer || undefined,
       status: status === 'All' ? undefined : status,
       page,
-      pageSize: PAGE_SIZE,
+      pageSize,
     })
       .then((data) => {
         if (cancelled) return
@@ -78,9 +78,11 @@ export default function Orders() {
     return () => {
       cancelled = true
     }
-  }, [search, customer, status, page])
+  }, [search, customer, status, page, pageSize])
 
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
+  const rangeStart = total === 0 ? 0 : (page - 1) * pageSize + 1
+  const rangeEnd = Math.min(page * pageSize, total)
 
   useEffect(() => {
     if (!selectedName) return
@@ -257,7 +259,11 @@ export default function Orders() {
         <div>
           <h2 className="text-lg font-semibold text-gray-900 dark:text-[#E8EAF0]">Orders</h2>
           <p className="text-xs text-gray-500 dark:text-[#8892A4] mt-0.5">
-            {loading ? 'Loading…' : `${total} order${total === 1 ? '' : 's'}`}
+            {loading
+              ? 'Loading…'
+              : total === 0
+                ? '0 orders'
+                : `Showing ${rangeStart.toLocaleString('en-IN')}–${rangeEnd.toLocaleString('en-IN')} of ${total.toLocaleString('en-IN')} orders`}
           </p>
         </div>
       </div>
@@ -293,6 +299,7 @@ export default function Orders() {
             </option>
           ))}
         </select>
+        <PageSizeSelect value={pageSize} onChange={setPageSize} label="Orders per page" />
       </div>
 
       {error && (
