@@ -30,7 +30,15 @@ def generate_token_id() -> str:
     return secrets.token_urlsafe(16)
 
 
-def create_access_token(*, subject: str, role: str, jti: str, token_version: int) -> tuple[str, int]:
+def create_access_token(
+    *,
+    subject: str,
+    role: str,
+    jti: str,
+    token_version: int,
+    distributor_id: str | None = None,
+    distributor_ids: list[str] | None = None,
+) -> tuple[str, int]:
     now = datetime.now(timezone.utc)
     hard_ceiling = timedelta(minutes=settings.token_hard_ceiling_minutes)
     payload = {
@@ -41,6 +49,14 @@ def create_access_token(*, subject: str, role: str, jti: str, token_version: int
         "iat": now,
         "exp": now + hard_ceiling,
     }
+    # Distributor data-scoping claims — see deps.get_current_distributor.
+    # Only one is ever set, based on role; never both, never neither for a
+    # distributor/sales_person subject (auth_service rejects login before
+    # a token is ever issued if the account has no linked distributor).
+    if distributor_id is not None:
+        payload["distributor_id"] = distributor_id
+    if distributor_ids is not None:
+        payload["distributor_ids"] = distributor_ids
     token = jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
     return token, int(hard_ceiling.total_seconds())
 

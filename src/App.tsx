@@ -3,17 +3,36 @@ import AdminDashboard from './components/admin/AdminDashboard'
 import AdminPortal from './components/admin/AdminPortal'
 import Analytics from './components/admin/Analytics'
 import Distributors from './components/admin/Distributors'
+import Offers from './components/admin/Offers'
 import Orders from './components/admin/Orders'
 import ProductCatalogue from './components/admin/ProductCatalogue'
 import Profile from './components/admin/Profile'
 import Reports from './components/admin/Reports'
 import SettingsScreen from './components/admin/Settings'
 import UserManagement from './components/admin/UserManagement'
+import ForgotPassword from './components/auth/ForgotPassword'
 import Login from './components/auth/Login'
+import ResetPassword from './components/auth/ResetPassword'
 import DashboardPlaceholder from './components/DashboardPlaceholder'
+import DistActiveOrders from './components/distributor/DistActiveOrders'
+import DistCompletedOrders from './components/distributor/DistCompletedOrders'
+import DistEndUsers from './components/distributor/DistEndUsers'
+import DistInventory from './components/distributor/DistInventory'
+import DistInvoices from './components/distributor/DistInvoices'
+import DistProductCatalogue from './components/distributor/DistProductCatalogue'
+import DistProfile from './components/distributor/DistProfile'
+import DistributorDashboard from './components/distributor/DistributorDashboard'
 import DistributorPortal from './components/distributor/DistributorPortal'
+import DistTrackShipment from './components/distributor/DistTrackShipment'
 import Placeholder from './components/layout/Placeholder'
-import { ADMIN_NAV_ITEMS, DISTRIBUTOR_NAV_ITEMS, screenTitle } from './config/navigation'
+import CreateOrder from './components/sales/CreateOrder'
+import MyCustomers from './components/sales/MyCustomers'
+import OrderHistory from './components/sales/OrderHistory'
+import PendingApprovals from './components/sales/PendingApprovals'
+import SalesProfile from './components/sales/Profile'
+import SalesPersonDashboard from './components/sales/SalesPersonDashboard'
+import SalesPersonPortal from './components/sales/SalesPersonPortal'
+import { ADMIN_NAV_ITEMS, DISTRIBUTOR_NAV_ITEMS, SALES_NAV_ITEMS, screenTitle } from './config/navigation'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { CartProvider } from './context/CartContext'
 import { ThemeProvider } from './context/ThemeContext'
@@ -79,6 +98,8 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={<LoginRoute />} />
+      <Route path="/forgot-password" element={<ForgotPassword />} />
+      <Route path="/reset-password" element={<ResetPassword />} />
 
       <Route path="/admin" element={<RoleGate role="admin" />}>
         <Route element={<AdminPortal />}>
@@ -98,6 +119,8 @@ function AppRoutes() {
                   <Distributors />
                 ) : item.screen === 'orders' ? (
                   <Orders />
+                ) : item.screen === 'offers' ? (
+                  <Offers />
                 ) : item.screen === 'reports' ? (
                   <Reports />
                 ) : item.screen === 'analytics' ? (
@@ -120,14 +143,69 @@ function AppRoutes() {
         <Route element={<DistributorPortal />}>
           <Route index element={<Navigate to="dashboard" replace />} />
           {DISTRIBUTOR_NAV_ITEMS.map((item) => (
-            <Route key={item.screen} path={item.path} element={<Placeholder title={screenTitle[item.screen]} />} />
+            <Route
+              key={item.screen}
+              path={item.path}
+              element={
+                item.screen === 'dist-dashboard' ? (
+                  <DistributorDashboard />
+                ) : item.screen === 'dist-products' ? (
+                  <DistProductCatalogue />
+                ) : item.screen === 'dist-active-orders' ? (
+                  <DistActiveOrders />
+                ) : item.screen === 'dist-completed-orders' ? (
+                  <DistCompletedOrders />
+                ) : item.screen === 'dist-inventory' ? (
+                  <DistInventory />
+                ) : item.screen === 'dist-invoices' ? (
+                  <DistInvoices />
+                ) : item.screen === 'dist-end-users' ? (
+                  <DistEndUsers />
+                ) : item.screen === 'dist-track' ? (
+                  <DistTrackShipment />
+                ) : item.screen === 'dist-profile' ? (
+                  <DistProfile />
+                ) : (
+                  <Placeholder title={screenTitle[item.screen]} />
+                )
+              }
+            />
+          ))}
+          <Route path="*" element={<Navigate to="dashboard" replace />} />
+        </Route>
+      </Route>
+
+      <Route path="/sales" element={<RoleGate role="sales_person" />}>
+        <Route element={<SalesPersonPortal />}>
+          <Route index element={<Navigate to="dashboard" replace />} />
+          {SALES_NAV_ITEMS.map((item) => (
+            <Route
+              key={item.screen}
+              path={item.path}
+              element={
+                item.screen === 'sales-dashboard' ? (
+                  <SalesPersonDashboard />
+                ) : item.screen === 'sales-create-order' ? (
+                  <CreateOrder />
+                ) : item.screen === 'sales-customers' ? (
+                  <MyCustomers />
+                ) : item.screen === 'sales-pending-approvals' ? (
+                  <PendingApprovals />
+                ) : item.screen === 'sales-order-history' ? (
+                  <OrderHistory />
+                ) : item.screen === 'sales-profile' ? (
+                  <SalesProfile />
+                ) : (
+                  <Placeholder title={screenTitle[item.screen]} />
+                )
+              }
+            />
           ))}
           <Route path="*" element={<Navigate to="dashboard" replace />} />
         </Route>
       </Route>
 
       <Route path="/manager" element={<RoleRoute role="manager" />} />
-      <Route path="/sales" element={<RoleRoute role="sales_person" />} />
       <Route path="/" element={<RootRedirect />} />
       <Route path="*" element={<RootRedirect />} />
     </Routes>

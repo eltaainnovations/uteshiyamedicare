@@ -1,14 +1,16 @@
-import { AlertCircle, Ban, CheckCircle, Clock, Plus, Search, X } from 'lucide-react'
+import { AlertCircle, Ban, CheckCircle, Clock, Link2, Plus, Search, X } from 'lucide-react'
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import {
   createPortalUser,
   disablePortalUser,
+  linkExistingUser,
   listPortalUsers,
   type PortalUser,
   type PortalUserStatus,
 } from '../../api/usersApi'
 import { ApiError, type Role } from '../../types/auth'
+import DistributorTypeahead from '../common/DistributorTypeahead'
 
 const ROLE_OPTIONS: Role[] = ['admin', 'manager', 'distributor', 'sales_person']
 const ROLE_LABELS: Record<Role, string> = {
@@ -48,6 +50,8 @@ interface CreateFormState {
   lastName: string
   portalRole: Role
   erpnextCustomerLink: string
+  /** Display label for erpnextCustomerLink, shown by the picker — never sent to the API. */
+  erpnextCustomerLabel: string | null
 }
 
 const EMPTY_FORM: CreateFormState = {
@@ -56,7 +60,10 @@ const EMPTY_FORM: CreateFormState = {
   lastName: '',
   portalRole: 'distributor',
   erpnextCustomerLink: '',
+  erpnextCustomerLabel: null,
 }
+
+type ModalMode = 'create' | 'link'
 
 export default function UserManagement() {
   const location = useLocation()
@@ -74,11 +81,12 @@ export default function UserManagement() {
   const [rowError, setRowError] = useState<string | null>(null)
 
   const [showModal, setShowModal] = useState(false)
+  const [modalMode, setModalMode] = useState<ModalMode>('create')
   const [form, setForm] = useState<CreateFormState>(EMPTY_FORM)
   const [formErrors, setFormErrors] = useState<Partial<Record<keyof CreateFormState, string>>>({})
   const [createSubmitting, setCreateSubmitting] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
-  const [createdUser, setCreatedUser] = useState<PortalUser | null>(null)
+  const [resultUser, setResultUser] = useState<PortalUser | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -104,7 +112,7 @@ export default function UserManagement() {
   // state immediately after so back/forward or a refresh doesn't reopen it.
   useEffect(() => {
     if ((location.state as { openAddUserModal?: boolean } | null)?.openAddUserModal) {
-      openModal()
+      openModal('create')
       navigate(location.pathname, { replace: true, state: {} })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -123,11 +131,12 @@ export default function UserManagement() {
     })
   }, [users, search, roleFilter, statusFilter])
 
-  function openModal() {
+  function openModal(mode: ModalMode) {
+    setModalMode(mode)
     setForm(EMPTY_FORM)
     setFormErrors({})
     setCreateError(null)
-    setCreatedUser(null)
+    setResultUser(null)
     setShowModal(true)
   }
 
@@ -135,13 +144,15 @@ export default function UserManagement() {
     setShowModal(false)
   }
 
-  function handleCreateSubmit(event: FormEvent) {
+  function handleFormSubmit(event: FormEvent) {
     event.preventDefault()
     const errors: Partial<Record<keyof CreateFormState, string>> = {}
     if (!form.email.trim()) errors.email = 'Email is required.'
-    if (!form.firstName.trim()) errors.firstName = 'First name is required.'
-    if (!form.lastName.trim()) errors.lastName = 'Last name is required.'
-    if (REQUIRES_LINK.includes(form.portalRole) && !form.erpnextCustomerLink.trim()) {
+    if (modalMode === 'create') {
+      if (!form.firstName.trim()) errors.firstName = 'First name is required.'
+      if (!form.lastName.trim()) errors.lastName = 'Last name is required.'
+    }
+    if (REQUIRES_LINK.includes(form.portalRole) && !form.erpnextCustomerLink) {
       errors.erpnextCustomerLink = 'Required for Distributor and Sales Person roles.'
     }
     setFormErrors(errors)
@@ -149,19 +160,31 @@ export default function UserManagement() {
 
     setCreateError(null)
     setCreateSubmitting(true)
-    createPortalUser({
-      email: form.email.trim(),
-      firstName: form.firstName.trim(),
-      lastName: form.lastName.trim(),
-      portalRole: form.portalRole,
-      erpnextCustomerLink: REQUIRES_LINK.includes(form.portalRole) ? form.erpnextCustomerLink.trim() : undefined,
-    })
-      .then((created) => {
-        setUsers((prev) => [created, ...prev])
-        setCreatedUser(created)
+
+    const submit =
+      modalMode === 'create'
+        ? createPortalUser({
+            email: form.email.trim(),
+            firstName: form.firstName.trim(),
+            lastName: form.lastName.trim(),
+            portalRole: form.portalRole,
+            erpnextCustomerLink: REQUIRES_LINK.includes(form.portalRole) ? form.erpnextCustomerLink : undefined,
+          })
+        : linkExistingUser({
+            email: form.email.trim(),
+            portalRole: form.portalRole,
+            erpnextCustomerLink: REQUIRES_LINK.includes(form.portalRole) ? form.erpnextCustomerLink : undefined,
+          })
+
+    submit
+      .then((result) => {
+        setUsers((prev) => [result, ...prev])
+        setResultUser(result)
       })
       .catch((err: unknown) => {
-        setCreateError(err instanceof ApiError ? err.message : 'Could not create this user. Please try again.')
+        const fallback =
+          modalMode === 'create' ? 'Could not create this user. Please try again.' : 'Could not link this user. Please try again.'
+        setCreateError(err instanceof ApiError ? err.message : fallback)
       })
       .finally(() => setCreateSubmitting(false))
   }
@@ -191,14 +214,23 @@ export default function UserManagement() {
             {loading ? 'Loading…' : `${users.length} total portal user${users.length === 1 ? '' : 's'}`}
           </p>
         </div>
-        <button
-          onClick={openModal}
-          className="flex items-center gap-1.5 px-4 py-2 text-sm text-white font-medium rounded-[10px] transition"
-          style={{ background: '#147BA6' }}
-        >
-          <Plus size={15} />
-          Add User
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => openModal('link')}
+            className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-[10px] border border-gray-200 dark:border-[#252836] text-gray-700 dark:text-[#B0BAD0] hover:bg-gray-50 dark:hover:bg-[#1F2233] transition"
+          >
+            <Link2 size={15} />
+            Link Existing ERPNext User
+          </button>
+          <button
+            onClick={() => openModal('create')}
+            className="flex items-center gap-1.5 px-4 py-2 text-sm text-white font-medium rounded-[10px] transition"
+            style={{ background: '#147BA6' }}
+          >
+            <Plus size={15} />
+            Add User
+          </button>
+        </div>
       </div>
 
       <div className="bg-white dark:bg-[#1A1D2E] rounded-[12px] p-4 border border-gray-100 dark:border-[#252836] shadow-sm flex flex-wrap gap-3 items-center">
@@ -340,24 +372,36 @@ export default function UserManagement() {
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
           <div className="bg-white dark:bg-[#1A1D2E] rounded-[16px] w-full max-w-md shadow-2xl">
             <div className="flex items-center justify-between px-6 py-5 border-b border-gray-100 dark:border-[#252836]">
-              <h3 className="text-base font-semibold text-gray-900 dark:text-[#E8EAF0]">Add New User</h3>
+              <h3 className="text-base font-semibold text-gray-900 dark:text-[#E8EAF0]">
+                {modalMode === 'create' ? 'Add New User' : 'Link Existing ERPNext User'}
+              </h3>
               <button onClick={closeModal} className="text-gray-400 hover:text-gray-600 dark:hover:text-[#E8EAF0] transition">
                 <X size={18} />
               </button>
             </div>
 
-            {createdUser ? (
+            {resultUser ? (
               <div className="p-6 space-y-4">
-                <div className="flex items-start gap-3 p-4 rounded-[10px] bg-amber-50 border border-amber-200">
-                  <Clock size={18} className="text-amber-600 flex-shrink-0 mt-0.5" />
-                  <p className="text-sm text-amber-800">
-                    <strong>
-                      {createdUser.firstName} {createdUser.lastName}
-                    </strong>{' '}
-                    was added with status <strong>Draft</strong> — pending admin approval. They will not be able to
-                    log in until the approval email is actioned and provisioning succeeds.
-                  </p>
-                </div>
+                {modalMode === 'create' ? (
+                  <div className="flex items-start gap-3 p-4 rounded-[10px] bg-amber-50 border border-amber-200">
+                    <Clock size={18} className="text-amber-600 flex-shrink-0 mt-0.5" />
+                    <p className="text-sm text-amber-800">
+                      <strong>
+                        {resultUser.firstName} {resultUser.lastName}
+                      </strong>{' '}
+                      was added with status <strong>Draft</strong> — pending admin approval. They will not be able to
+                      log in until the approval email is actioned and provisioning succeeds.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="flex items-start gap-3 p-4 rounded-[10px] bg-green-50 border border-green-200">
+                    <CheckCircle size={18} className="text-green-600 flex-shrink-0 mt-0.5" />
+                    <p className="text-sm text-green-800">
+                      <strong>{resultUser.email}</strong> is now linked and <strong>Active</strong>. No new ERPNext
+                      account was created — they can log in immediately with their existing ERPNext password.
+                    </p>
+                  </div>
+                )}
                 <button
                   onClick={closeModal}
                   className="w-full py-2 text-sm text-white rounded-[8px] font-semibold transition"
@@ -367,8 +411,15 @@ export default function UserManagement() {
                 </button>
               </div>
             ) : (
-              <form onSubmit={handleCreateSubmit}>
+              <form onSubmit={handleFormSubmit}>
                 <div className="p-6 space-y-4">
+                  {modalMode === 'link' && (
+                    <p className="px-3 py-2 rounded-[8px] bg-[#e8f4fa] border border-[#c7e2ef] text-[#0f5f82] text-xs">
+                      This links an existing ERPNext account — no new account is created, no onboarding email is
+                      sent.
+                    </p>
+                  )}
+
                   {createError && (
                     <p className="px-3 py-2 rounded-[8px] bg-red-50 border border-red-200 text-red-700 text-xs">
                       {createError}
@@ -388,28 +439,30 @@ export default function UserManagement() {
                     {formErrors.email && <p className="mt-1 text-xs text-red-600">{formErrors.email}</p>}
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-medium text-gray-700 dark:text-[#B0BAD0] mb-1.5">First Name</label>
-                      <input
-                        value={form.firstName}
-                        onChange={(e) => setForm({ ...form, firstName: e.target.value })}
-                        disabled={createSubmitting}
-                        className="w-full px-3 py-2 text-sm border border-gray-200 dark:border-[#252836] dark:bg-[#13161F] dark:text-[#E8EAF0] rounded-[8px] outline-none focus:border-[#147BA6] transition"
-                      />
-                      {formErrors.firstName && <p className="mt-1 text-xs text-red-600">{formErrors.firstName}</p>}
+                  {modalMode === 'create' && (
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 dark:text-[#B0BAD0] mb-1.5">First Name</label>
+                        <input
+                          value={form.firstName}
+                          onChange={(e) => setForm({ ...form, firstName: e.target.value })}
+                          disabled={createSubmitting}
+                          className="w-full px-3 py-2 text-sm border border-gray-200 dark:border-[#252836] dark:bg-[#13161F] dark:text-[#E8EAF0] rounded-[8px] outline-none focus:border-[#147BA6] transition"
+                        />
+                        {formErrors.firstName && <p className="mt-1 text-xs text-red-600">{formErrors.firstName}</p>}
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 dark:text-[#B0BAD0] mb-1.5">Last Name</label>
+                        <input
+                          value={form.lastName}
+                          onChange={(e) => setForm({ ...form, lastName: e.target.value })}
+                          disabled={createSubmitting}
+                          className="w-full px-3 py-2 text-sm border border-gray-200 dark:border-[#252836] dark:bg-[#13161F] dark:text-[#E8EAF0] rounded-[8px] outline-none focus:border-[#147BA6] transition"
+                        />
+                        {formErrors.lastName && <p className="mt-1 text-xs text-red-600">{formErrors.lastName}</p>}
+                      </div>
                     </div>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-700 dark:text-[#B0BAD0] mb-1.5">Last Name</label>
-                      <input
-                        value={form.lastName}
-                        onChange={(e) => setForm({ ...form, lastName: e.target.value })}
-                        disabled={createSubmitting}
-                        className="w-full px-3 py-2 text-sm border border-gray-200 dark:border-[#252836] dark:bg-[#13161F] dark:text-[#E8EAF0] rounded-[8px] outline-none focus:border-[#147BA6] transition"
-                      />
-                      {formErrors.lastName && <p className="mt-1 text-xs text-red-600">{formErrors.lastName}</p>}
-                    </div>
-                  </div>
+                  )}
 
                   <div>
                     <label className="block text-xs font-medium text-gray-700 dark:text-[#B0BAD0] mb-1.5">Portal Role</label>
@@ -432,19 +485,19 @@ export default function UserManagement() {
                       <label className="block text-xs font-medium text-gray-700 dark:text-[#B0BAD0] mb-1.5">
                         Linked Distributor
                       </label>
-                      <input
-                        value={form.erpnextCustomerLink}
-                        onChange={(e) => setForm({ ...form, erpnextCustomerLink: e.target.value })}
-                        placeholder="ERPNext Customer ID (e.g. CUST-00023)"
+                      <DistributorTypeahead
+                        value={form.erpnextCustomerLink || null}
+                        label={form.erpnextCustomerLabel}
+                        onSelect={(name, label) =>
+                          setForm({ ...form, erpnextCustomerLink: name ?? '', erpnextCustomerLabel: label })
+                        }
+                        placeholder="Search distributor by name..."
+                        showTerritory
                         disabled={createSubmitting}
-                        className="w-full px-3 py-2 text-sm border border-gray-200 dark:border-[#252836] dark:bg-[#13161F] dark:text-[#E8EAF0] rounded-[8px] outline-none focus:border-[#147BA6] transition"
                       />
                       {formErrors.erpnextCustomerLink && (
                         <p className="mt-1 text-xs text-red-600">{formErrors.erpnextCustomerLink}</p>
                       )}
-                      <p className="mt-1 text-[10px] text-gray-400 dark:text-[#5A6075]">
-                        Temporary free-text field until Distributor Management is live.
-                      </p>
                     </div>
                   )}
                 </div>
@@ -463,7 +516,13 @@ export default function UserManagement() {
                     className="flex-1 py-2 text-sm text-white rounded-[8px] font-semibold transition disabled:opacity-70"
                     style={{ background: '#147BA6' }}
                   >
-                    {createSubmitting ? 'Creating…' : 'Create User'}
+                    {modalMode === 'create'
+                      ? createSubmitting
+                        ? 'Creating…'
+                        : 'Create User'
+                      : createSubmitting
+                        ? 'Linking…'
+                        : 'Link User'}
                   </button>
                 </div>
               </form>

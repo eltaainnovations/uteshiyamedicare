@@ -41,6 +41,14 @@ class ERPNextNotFoundError(Exception):
     """ERPNext returned 404 for a single-document lookup."""
 
 
+class ERPNextValidationError(Exception):
+    """ERPNext rejected a document create/update (e.g. MandatoryError,
+    ValidationError). The message is ERPNext's own text, extracted from
+    the response body rather than reworded — callers that build a
+    document from user input need to see exactly what ERPNext said, not
+    a generic status-code message."""
+
+
 def _token_auth_header() -> dict[str, str]:
     return {"Authorization": f"token {settings.erpnext_user_api_key}:{settings.erpnext_user_api_secret}"}
 
@@ -107,6 +115,16 @@ async def erpnext_login(usr: str, pwd: str) -> ERPNextSession:
         raise ERPNextAuthError("ERPNext did not confirm login")
 
     sid = response.cookies.get("sid")
+    # _get_client() is one shared httpx.AsyncClient reused for every call,
+    # for every user, for the life of the process — httpx auto-persists
+    # Set-Cookie into its jar and resends matching cookies on every later
+    # request to the same host. Every other call in this module
+    # authenticates via an explicit Authorization header and never wants
+    # this jar's cookies; left uncleared, this login's sid would silently
+    # ride along on unrelated later requests (including ones meant to run
+    # as the shared API key) and let ERPNext identify the caller as this
+    # user instead. Clear it the instant we've read what we need from it.
+    _get_client().cookies.clear()
     if not sid or sid == "Guest":
         raise ERPNextUnavailableError("ERPNext login succeeded but returned no session id")
 
@@ -126,6 +144,10 @@ async def erpnext_logout(sid: str) -> None:
             logger.warning("ERPNext logout returned status %s", response.status_code)
     except httpx.HTTPError as exc:
         logger.warning("ERPNext logout request failed: %s", exc)
+    finally:
+        # Same reasoning as erpnext_login: never let a session cookie
+        # linger in the shared client's jar past the call that needed it.
+        _get_client().cookies.clear()
 
 
 async def erpnext_create_user(
@@ -175,6 +197,161 @@ async def erpnext_update_user(email: str, fields: dict[str, Any]) -> None:
             "ERPNext update-user for %s returned status %s: %s", email, response.status_code, response.text
         )
         raise ERPNextUnavailableError(f"ERPNext returned status {response.status_code}")
+
+
+async def erpnext_update_doc(
+    doctype: str, name: str, fields: dict[str, Any], *, use_user_token: bool = True
+) -> dict[str, Any]:
+    """PUT /api/resource/{doctype}/{name} with only the fields being changed —
+    same shape as erpnext_update_user, generalised. Used for Sales Order
+    submit/cancel (docstatus 1/2) from the Distributor Portal's approval
+    widget. Defaults to the Users-scoped token (the only write key the
+    Portal holds); the catalogue key is read-only.
+
+    NOTE: submit/cancel via this call needs the key's ERPNext user to hold
+    submit + cancel permission on the doctype — see the Sales Invoice read
+    gap already flagged in orders_service. If that permission is missing
+    ERPNext answers non-200 and this raises ERPNextUnavailableError.
+    """
+    url = f"{settings.erpnext_base_url}/api/resource/{quote(doctype, safe='')}/{quote(name, safe='')}"
+    headers = _token_auth_header() if use_user_token else _catalogue_auth_header()
+    try:
+        response = await _get_client().put(url, json=fields, headers=headers)
+    except httpx.HTTPError as exc:
+        logger.warning("ERPNext PUT %s/%s failed: %s", doctype, name, exc)
+        raise ERPNextUnavailableError("Could not reach ERPNext") from exc
+
+    if response.status_code == 404:
+        raise ERPNextNotFoundError(f"{doctype} {name} not found")
+
+    if response.status_code != 200:
+        logger.warning(
+            "ERPNext PUT %s/%s returned status %s: %s", doctype, name, response.status_code, response.text
+        )
+        raise ERPNextUnavailableError(f"ERPNext returned status {response.status_code}")
+
+    return response.json().get("data", {})
+
+
+def _extract_erpnext_error(response: httpx.Response) -> str:
+    """Pull ERPNext's own error text out of a failed response. Frappe's
+    REST API puts the real, user-facing message(s) in `_server_messages`
+    (a JSON-encoded list of JSON-encoded strings, each usually
+    {"message": ..., "title": ...}); falls back to the `exception`
+    field (a Python exception repr) or, failing that, the raw body."""
+    try:
+        body = response.json()
+    except ValueError:
+        return response.text.strip() or f"ERPNext returned status {response.status_code}"
+
+    messages: list[str] = []
+    raw_server_messages = body.get("_server_messages")
+    if raw_server_messages:
+        try:
+            for entry in json.loads(raw_server_messages):
+                try:
+                    parsed = json.loads(entry)
+                    messages.append(str(parsed["message"]) if isinstance(parsed, dict) and parsed.get("message") else str(parsed))
+                except (ValueError, TypeError, KeyError):
+                    messages.append(str(entry))
+        except (ValueError, TypeError):
+            pass
+
+    if messages:
+        return "; ".join(messages)
+
+    for key in ("exception", "message", "exc"):
+        value = body.get(key)
+        if value:
+            return str(value).strip().splitlines()[0]
+
+    return response.text.strip() or f"ERPNext returned status {response.status_code}"
+
+
+async def erpnext_create_doc(doctype: str, fields: dict[str, Any], *, use_user_token: bool = True) -> dict[str, Any]:
+    """POST /api/resource/{doctype} — creates a new document. Same auth
+    convention as erpnext_update_doc (Users-scoped token by default).
+
+    Unlike every other helper in this module, a failure here is raised as
+    ERPNextValidationError carrying ERPNext's own message (see
+    _extract_erpnext_error) rather than collapsed into
+    ERPNextUnavailableError's generic "returned status N" — a caller
+    building a document from user input (e.g. Sales Order creation) needs
+    the real field-level error, not just a status code.
+    """
+    url = f"{settings.erpnext_base_url}/api/resource/{quote(doctype, safe='')}"
+    headers = _token_auth_header() if use_user_token else _catalogue_auth_header()
+    try:
+        response = await _get_client().post(url, json=fields, headers=headers)
+    except httpx.HTTPError as exc:
+        logger.warning("ERPNext POST %s failed: %s", doctype, exc)
+        raise ERPNextUnavailableError("Could not reach ERPNext") from exc
+
+    if response.status_code in (200, 201):
+        return response.json().get("data", {})
+
+    message = _extract_erpnext_error(response)
+    logger.warning("ERPNext POST %s returned status %s: %s", doctype, response.status_code, response.text)
+    raise ERPNextValidationError(message)
+
+
+async def erpnext_delete_doc(doctype: str, name: str, *, use_user_token: bool = True) -> None:
+    """DELETE /api/resource/{doctype}/{name} — permanently deletes a
+    document. Only for documents ERPNext will actually allow deleted
+    (a still-draft/docstatus=0 doc with nothing linked to it); anything
+    else comes back as a real ERPNext error, surfaced via
+    ERPNextValidationError the same way erpnext_create_doc does, not
+    collapsed to a generic status code.
+    """
+    url = f"{settings.erpnext_base_url}/api/resource/{quote(doctype, safe='')}/{quote(name, safe='')}"
+    headers = _token_auth_header() if use_user_token else _catalogue_auth_header()
+    try:
+        response = await _get_client().delete(url, headers=headers)
+    except httpx.HTTPError as exc:
+        logger.warning("ERPNext DELETE %s/%s failed: %s", doctype, name, exc)
+        raise ERPNextUnavailableError("Could not reach ERPNext") from exc
+
+    if response.status_code == 404:
+        raise ERPNextNotFoundError(f"{doctype} {name} not found")
+    if response.status_code in (200, 202, 204):
+        return
+
+    message = _extract_erpnext_error(response)
+    logger.warning("ERPNext DELETE %s/%s returned status %s: %s", doctype, name, response.status_code, response.text)
+    raise ERPNextValidationError(message)
+
+
+async def erpnext_download_pdf(
+    doctype: str, name: str, *, print_format: str = "Standard", use_user_token: bool = True
+) -> bytes:
+    """GET /api/method/frappe.utils.print_format.download_pdf — the raw
+    PDF bytes for one document's default print format. Confirmed live
+    (2026-09-29) against a real Sales Invoice: 200, application/pdf.
+    Same proxy pattern as every other call here — the browser never gets
+    ERPNext credentials; our backend fetches the PDF and streams it back.
+    """
+    url = f"{settings.erpnext_base_url}/api/method/frappe.utils.print_format.download_pdf"
+    params = {"doctype": doctype, "name": name, "format": print_format, "no_letterhead": "0"}
+    headers = _token_auth_header() if use_user_token else _catalogue_auth_header()
+    try:
+        response = await _get_client().get(url, params=params, headers=headers)
+    except httpx.HTTPError as exc:
+        logger.warning("ERPNext PDF download %s/%s failed: %s", doctype, name, exc)
+        raise ERPNextUnavailableError("Could not reach ERPNext") from exc
+
+    if response.status_code == 404:
+        raise ERPNextNotFoundError(f"{doctype} {name} not found")
+    if response.status_code != 200 or "pdf" not in response.headers.get("content-type", "").lower():
+        logger.warning(
+            "ERPNext PDF download %s/%s returned status %s, content-type %s",
+            doctype,
+            name,
+            response.status_code,
+            response.headers.get("content-type"),
+        )
+        raise ERPNextUnavailableError(f"ERPNext returned status {response.status_code}")
+
+    return response.content
 
 
 async def erpnext_get_list(
@@ -261,13 +438,18 @@ async def erpnext_get_count(doctype: str, *, filters: list[Any] | None = None, u
     return int(response.json().get("message", 0))
 
 
-async def erpnext_get_doc(doctype: str, name: str, *, use_user_token: bool = False) -> dict[str, Any]:
+async def erpnext_get_doc(
+    doctype: str, name: str, *, fields: list[str] | None = None, use_user_token: bool = False
+) -> dict[str, Any]:
     """GET /api/resource/{doctype}/{name}, read-only. Catalogue-scoped
-    token unless use_user_token=True."""
+    token unless use_user_token=True. `fields` narrows the response to
+    just those top-level keys (child tables included by name) — omit it
+    to get the whole document, as every existing caller does."""
     url = f"{settings.erpnext_base_url}/api/resource/{quote(doctype, safe='')}/{quote(name, safe='')}"
+    params = {"fields": json.dumps(fields)} if fields is not None else None
     headers = _token_auth_header() if use_user_token else _catalogue_auth_header()
     try:
-        response = await _get_client().get(url, headers=headers)
+        response = await _get_client().get(url, params=params, headers=headers)
     except httpx.HTTPError as exc:
         logger.warning("ERPNext GET %s/%s failed: %s", doctype, name, exc)
         raise ERPNextUnavailableError("Could not reach ERPNext") from exc

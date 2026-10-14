@@ -1,3 +1,6 @@
+from dataclasses import dataclass
+from typing import Literal
+
 import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -32,7 +35,19 @@ def get_current_user(
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Session invalidated by administrator, please log in again")
 
     record = touch_session(jti)
-    return PortalUser(email=record.email, name=record.name, role=record.role), jti
+    return (
+        PortalUser(
+            email=record.email,
+            name=record.name,
+            role=record.role,
+            # Re-derived from the JWT claims on every request — never from
+            # SessionRecord/DB — so a distributor's scope can't drift from
+            # what they were actually issued at login.
+            distributor_id=payload.get("distributor_id"),
+            distributor_ids=payload.get("distributor_ids"),
+        ),
+        jti,
+    )
 
 
 def require_admin(current: tuple[PortalUser, str] = Depends(get_current_user)) -> PortalUser:
@@ -40,3 +55,30 @@ def require_admin(current: tuple[PortalUser, str] = Depends(get_current_user)) -
     if user.role != "admin":
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Admin access required")
     return user
+
+
+@dataclass
+class DistributorScope:
+    role: Literal["distributor", "sales_person"]
+    distributor_ids: list[str]  # 1 item for "distributor", N for "sales_person"
+
+
+def get_current_distributor(current: tuple[PortalUser, str] = Depends(get_current_user)) -> DistributorScope:
+    """Every distributor-facing endpoint depends on this instead of trusting
+    a distributor id from the request. The scope always comes from the
+    caller's own JWT claims (see security.create_access_token /
+    auth_service.authenticate_credentials) — there is no code path by which
+    a distributor or sales person can pass a different id and see someone
+    else's data."""
+    user, _jti = current
+    if user.role == "distributor":
+        ids = [user.distributor_id] if user.distributor_id else []
+    elif user.role == "sales_person":
+        ids = user.distributor_ids or []
+    else:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Distributor or Sales Person access required")
+
+    if not ids:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="No linked distributor found for this account")
+
+    return DistributorScope(role=user.role, distributor_ids=ids)
