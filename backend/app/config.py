@@ -78,6 +78,19 @@ class Settings(BaseSettings):
     approval_token_ttl_hours: int = 72
     onboarding_token_ttl_hours: int = 168
 
+    # Shree Maruti (innofulfill) Client Booking API — used only for
+    # read-only shipment tracking by manually-entered docket (see
+    # maruti_client.py). Beta base URL by default. clientcode + secretkey
+    # are backend-only; secretkey is used solely for the daily /login and
+    # must never reach the frontend.
+    maruti_base_url: str = "https://bookingapis.innofulfill.com/shipment/clientbookingbeta_v6"
+    maruti_client_code: str = "148874"
+    maruti_secret_key: str = "NOj4wz9LSHCJ"
+    # Public, user-facing tracking page — linked from the Track Shipment
+    # screen. The live SPA reads the docket from `?d=<docket>`
+    # (maruti_service._tracking_url builds the full link).
+    maruti_public_tracking_url: str = "https://tracking.shreemaruti.com"
+
     # SQLite file holding the Portal users table — the only thing in this
     # backend that needs to survive a restart (unlike the in-memory OTP/
     # session stores in auth_service.py).
@@ -86,6 +99,12 @@ class Settings(BaseSettings):
     # Public base URL of this backend, used to build the approve/onboarding
     # links embedded in emails.
     backend_base_url: str = "http://localhost:8000"
+
+    # Public base URL of the React app. Only the password-reset email link
+    # points here (users_service.request_password_reset) — the first-time
+    # onboarding welcome-email link still points at backend_base_url's
+    # plain HTML form above, since that flow wasn't rebuilt as a React page.
+    frontend_base_url: str = "http://localhost:5173"
 
 
 settings = Settings()

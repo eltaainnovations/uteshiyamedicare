@@ -8,8 +8,10 @@ import {
   Home,
   LayoutDashboard,
   Package,
+  PlusCircle,
   Settings,
   ShoppingCart,
+  Tag,
   TrendingUp,
   Truck,
   UserCircle,
@@ -22,6 +24,7 @@ export type Screen =
   | 'distributors'
   | 'product-catalogue'
   | 'orders'
+  | 'offers'
   | 'email-management'
   | 'reports'
   | 'analytics'
@@ -37,6 +40,12 @@ export type Screen =
   | 'dist-inventory'
   | 'dist-end-users'
   | 'dist-profile'
+  | 'sales-dashboard'
+  | 'sales-customers'
+  | 'sales-create-order'
+  | 'sales-pending-approvals'
+  | 'sales-order-history'
+  | 'sales-profile'
 
 export interface NavItem {
   icon: LucideIcon
@@ -52,6 +61,7 @@ export const screenTitle: Record<Screen, string> = {
   distributors: 'Distributors',
   'product-catalogue': 'Product Catalogue',
   orders: 'Orders',
+  offers: 'Offers',
   'email-management': 'Email Management',
   reports: 'Reports',
   analytics: 'Analytics',
@@ -67,6 +77,12 @@ export const screenTitle: Record<Screen, string> = {
   'dist-inventory': 'Inventory',
   'dist-end-users': 'End User Records',
   'dist-profile': 'Profile',
+  'sales-dashboard': 'Dashboard',
+  'sales-customers': 'My Customers',
+  'sales-create-order': 'Create Order',
+  'sales-pending-approvals': 'Pending Approvals',
+  'sales-order-history': 'Order History',
+  'sales-profile': 'Profile',
 }
 
 export const ADMIN_NAV_ITEMS: NavItem[] = [
@@ -75,6 +91,7 @@ export const ADMIN_NAV_ITEMS: NavItem[] = [
   { icon: Building2, label: 'Distributors', screen: 'distributors', path: 'distributors' },
   { icon: Package, label: 'Product Catalogue', screen: 'product-catalogue', path: 'product-catalogue' },
   { icon: ShoppingCart, label: 'Orders', screen: 'orders', path: 'orders' },
+  { icon: Tag, label: 'Offers', screen: 'offers', path: 'offers' },
   { icon: BarChart2, label: 'Reports', screen: 'reports', path: 'reports' },
   { icon: TrendingUp, label: 'Analytics', screen: 'analytics', path: 'analytics' },
   { icon: Settings, label: 'Settings', screen: 'settings', path: 'settings' },
@@ -90,4 +107,13 @@ export const DISTRIBUTOR_NAV_ITEMS: NavItem[] = [
   { icon: Archive, label: 'Inventory', screen: 'dist-inventory', path: 'inventory' },
   { icon: Users, label: 'End User Records', screen: 'dist-end-users', path: 'end-users' },
   { icon: UserCircle, label: 'Profile', screen: 'dist-profile', path: 'profile' },
+]
+
+export const SALES_NAV_ITEMS: NavItem[] = [
+  { icon: Home, label: 'Dashboard', screen: 'sales-dashboard', path: 'dashboard' },
+  { icon: Users, label: 'My Customers', screen: 'sales-customers', path: 'customers' },
+  { icon: PlusCircle, label: 'Create Order', screen: 'sales-create-order', path: 'create-order' },
+  { icon: ClipboardList, label: 'Pending Approvals', screen: 'sales-pending-approvals', path: 'pending-approvals' },
+  { icon: FileText, label: 'Order History', screen: 'sales-order-history', path: 'order-history' },
+  { icon: UserCircle, label: 'Profile', screen: 'sales-profile', path: 'profile' },
 ]

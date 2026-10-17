@@ -7,9 +7,8 @@ import {
   type DistributorListItem,
 } from '../../api/distributorsApi'
 import { ApiError } from '../../types/auth'
+import PageSizeSelect from '../common/PageSizeSelect'
 import Pagination from '../common/Pagination'
-
-const PAGE_SIZE = 20
 
 export default function Distributors() {
   const [searchInput, setSearchInput] = useState('')
@@ -17,6 +16,7 @@ export default function Distributors() {
   const [customerGroup, setCustomerGroup] = useState('All')
   const [territory, setTerritory] = useState('All')
   const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(20)
 
   const [items, setItems] = useState<DistributorListItem[]>([])
   const [total, setTotal] = useState(0)
@@ -35,10 +35,10 @@ export default function Distributors() {
     return () => window.clearTimeout(t)
   }, [searchInput])
 
-  // Any filter change invalidates the current page number.
+  // Any filter/page-size change invalidates the current page number.
   useEffect(() => {
     setPage(1)
-  }, [search, customerGroup, territory])
+  }, [search, customerGroup, territory, pageSize])
 
   useEffect(() => {
     let cancelled = false
@@ -49,7 +49,7 @@ export default function Distributors() {
       customerGroup: customerGroup === 'All' ? undefined : customerGroup,
       territory: territory === 'All' ? undefined : territory,
       page,
-      pageSize: PAGE_SIZE,
+      pageSize,
     })
       .then((data) => {
         if (cancelled) return
@@ -68,9 +68,11 @@ export default function Distributors() {
     return () => {
       cancelled = true
     }
-  }, [search, customerGroup, territory, page])
+  }, [search, customerGroup, territory, page, pageSize])
 
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
+  const rangeStart = total === 0 ? 0 : (page - 1) * pageSize + 1
+  const rangeEnd = Math.min(page * pageSize, total)
 
   useEffect(() => {
     if (!selectedName) return
@@ -242,7 +244,11 @@ export default function Distributors() {
         <div>
           <h2 className="text-lg font-semibold text-gray-900 dark:text-[#E8EAF0]">Distributors</h2>
           <p className="text-xs text-gray-500 dark:text-[#8892A4] mt-0.5">
-            {loading ? 'Loading…' : `${total} distributor${total === 1 ? '' : 's'}`}
+            {loading
+              ? 'Loading…'
+              : total === 0
+                ? '0 distributors'
+                : `Showing ${rangeStart.toLocaleString('en-IN')}–${rangeEnd.toLocaleString('en-IN')} of ${total.toLocaleString('en-IN')} distributors`}
           </p>
         </div>
       </div>
@@ -281,6 +287,7 @@ export default function Distributors() {
             </option>
           ))}
         </select>
+        <PageSizeSelect value={pageSize} onChange={setPageSize} label="Distributors per page" />
       </div>
 
       {error && (

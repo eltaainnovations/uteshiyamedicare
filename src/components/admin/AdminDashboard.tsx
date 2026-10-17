@@ -456,17 +456,25 @@ export default function AdminDashboard() {
           ) : (
             <ResponsiveContainer width="100%" height={240}>
               <BarChart
-                data={topProducts.data?.items.slice(0, 10).map((p) => ({
-                  ...p,
-                  label: (p.itemName ?? p.itemCode).length > 24 ? `${(p.itemName ?? p.itemCode).slice(0, 22)}…` : (p.itemName ?? p.itemCode),
-                })) ?? []}
+                data={topProducts.data?.items.slice(0, 10).map((p) => {
+                  const fullLabel = p.itemName ?? p.itemCode
+                  return {
+                    ...p,
+                    fullLabel,
+                    label: fullLabel.length > 20 ? `${fullLabel.slice(0, 19)}…` : fullLabel,
+                  }
+                }) ?? []}
                 layout="vertical"
                 margin={{ left: 0, right: 10, top: 0, bottom: 0 }}
               >
                 <CartesianGrid strokeDasharray="3 3" stroke={grid} horizontal={false} />
                 <XAxis type="number" tick={{ fontSize: 10, fill: axis }} axisLine={false} tickLine={false} tickFormatter={(v: number) => formatInr(v)} />
-                <YAxis type="category" dataKey="label" tick={{ fontSize: 10, fill: axis }} axisLine={false} tickLine={false} width={120} />
-                <Tooltip formatter={(v) => [formatInr(Number(v)), 'Revenue']} contentStyle={tooltip} />
+                <YAxis type="category" dataKey="label" tick={{ fontSize: 10, fill: axis }} axisLine={false} tickLine={false} width={140} />
+                <Tooltip
+                  formatter={(v) => [formatInr(Number(v)), 'Revenue']}
+                  labelFormatter={(_, payload) => payload?.[0]?.payload?.fullLabel ?? ''}
+                  contentStyle={tooltip}
+                />
                 <Bar dataKey="revenue" fill="#147BA6" radius={[0, 4, 4, 0]} barSize={14} />
               </BarChart>
             </ResponsiveContainer>

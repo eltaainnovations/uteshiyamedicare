@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from .. import auth_service, users_service
 from ..auth_service import PortalUser
@@ -9,6 +9,7 @@ from ..schemas import (
     LoginRequest,
     MessageResponse,
     PasswordResetRequest,
+    ResetPasswordRequest,
     SessionResponse,
     TokenResponse,
     UserOut,
@@ -60,3 +61,17 @@ async def request_password_reset(payload: PasswordResetRequest) -> MessageRespon
     # email is a registered/active Portal account.
     await users_service.request_password_reset(payload.email)
     return MessageResponse(detail="If that email is registered, a password reset link has been sent.")
+
+
+@router.post("/reset-password", response_model=MessageResponse)
+async def reset_password(payload: ResetPasswordRequest) -> MessageResponse:
+    # JSON counterpart to POST /users/onboarding/{token} — same
+    # users_service.set_password_via_onboarding underneath (token
+    # validation, password policy, reuse-check, the shared
+    # _apply_new_password write — ERPNext for most roles, local hash only
+    # for Distributor), just returning JSON for the React reset-
+    # confirmation page instead of a server-rendered HTML page.
+    ok, message = await users_service.set_password_via_onboarding(payload.token, payload.new_password)
+    if not ok:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=message)
+    return MessageResponse(detail=message)

@@ -8,10 +8,13 @@ from fastapi.staticfiles import StaticFiles
 
 from .config import settings
 from .erpnext_client import aclose_client
+from .maruti_client import aclose_client as aclose_maruti_client
 from .routers.analytics import router as analytics_router
 from .routers.auth import router as auth_router
 from .routers.distributors import router as distributors_router
+from .routers.offers import router as offers_router
 from .routers.orders import router as orders_router
+from .routers.portal import router as portal_router
 from .routers.products import router as products_router
 from .routers.reports import router as reports_router
 from .routers.settings import router as settings_router
@@ -26,9 +29,10 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     yield
-    # Releases the pooled connections opened by erpnext_client's shared
-    # httpx client — otherwise they leak past process shutdown.
+    # Releases the pooled connections opened by the shared httpx clients —
+    # otherwise they leak past process shutdown.
     await aclose_client()
+    await aclose_maruti_client()
 
 
 app = FastAPI(title="Uteshiya Medicare Portal API", lifespan=lifespan)
@@ -46,6 +50,8 @@ app.include_router(users_router)
 app.include_router(products_router)
 app.include_router(distributors_router)
 app.include_router(orders_router)
+app.include_router(offers_router)
+app.include_router(portal_router)
 app.include_router(reports_router)
 app.include_router(analytics_router)
 app.include_router(settings_router)

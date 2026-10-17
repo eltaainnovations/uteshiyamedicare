@@ -9,11 +9,11 @@ import {
 } from '../../api/productsApi'
 import { ApiError } from '../../types/auth'
 import Pagination from '../common/Pagination'
+import PageSizeSelect from '../common/PageSizeSelect'
 
 type ViewMode = 'grid' | 'list'
 type DetailTab = 'Description' | 'Specifications' | 'Variants Table'
 const ALL_DETAIL_TABS: DetailTab[] = ['Description', 'Specifications', 'Variants Table']
-const PAGE_SIZE_OPTIONS = [20, 50, 100, 200] as const
 
 function formatFullInr(amount: number): string {
   return `₹${amount.toLocaleString('en-IN')}`
@@ -396,18 +396,7 @@ export default function ProductCatalogue() {
         <button className="flex items-center gap-1.5 px-3 py-2 text-sm border border-gray-200 dark:border-[#252836] rounded-[8px] text-gray-600 dark:text-[#96A0B4] hover:bg-gray-50 dark:hover:bg-[#1F2233] transition">
           <Filter size={13} /> Filters
         </button>
-        <select
-          value={pageSize}
-          onChange={(e) => setPageSize(Number(e.target.value))}
-          title="Products per page"
-          className="px-3 py-2 text-sm border border-gray-200 dark:border-[#252836] dark:bg-[#13161F] dark:text-[#E8EAF0] rounded-[8px] outline-none focus:border-[#147BA6] transition"
-        >
-          {PAGE_SIZE_OPTIONS.map((size) => (
-            <option key={size} value={size}>
-              {size} / page
-            </option>
-          ))}
-        </select>
+        <PageSizeSelect value={pageSize} onChange={setPageSize} label="Products per page" />
         <div className="flex border border-gray-200 dark:border-[#252836] rounded-[8px] overflow-hidden">
           <button
             onClick={() => setView('list')}
@@ -486,8 +475,8 @@ export default function ProductCatalogue() {
                           {p.itemGroup}
                         </span>
                       </td>
-                      <td className="px-4 py-3">
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#e8f4fa] dark:bg-[rgba(20,123,166,0.15)] text-[#147BA6]">
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#e8f4fa] dark:bg-[rgba(20,123,166,0.15)] text-[#147BA6] whitespace-nowrap">
                           {p.hasVariants ? 'Multiple' : 'Single SKU'}
                         </span>
                       </td>
