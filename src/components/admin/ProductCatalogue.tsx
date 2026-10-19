@@ -159,7 +159,7 @@ export default function ProductCatalogue() {
               <div className="lg:col-span-2">
                 <div className="rounded-[16px] bg-gray-50 dark:bg-[#161921] aspect-square flex items-center justify-center border border-gray-100 dark:border-[#252836] overflow-hidden">
                   {detail.image ? (
-                    <img src={detail.image} alt={detail.itemName} className="w-full h-full object-cover" />
+                    <img src={detail.image} alt={detail.itemName} className="w-full h-full object-contain p-4" />
                   ) : (
                     <Package size={64} className="text-gray-300 dark:text-[#353848]" />
                   )}

@@ -11,6 +11,7 @@ disagree on how a number was derived.
 import asyncio
 from typing import Any
 
+from .config import settings
 from .erpnext_client import ERPNextNotFoundError, erpnext_get_doc, erpnext_get_list
 
 # (erp_field, display label) for fields worth surfacing as "Specifications"
@@ -100,6 +101,17 @@ def stock_status(total: int) -> str:
     if total < STOCK_LOW_THRESHOLD:
         return "low_stock"
     return "in_stock"
+
+
+def _resolve_image_url(image: str | None) -> str | None:
+    """ERPNext's Item.image is site-relative (e.g. "/files/foo.png"), not an
+    absolute URL — resolve it against the ERPNext instance so the frontend
+    (on a different origin) can actually load it."""
+    if not image:
+        return None
+    if image.startswith("http://") or image.startswith("https://"):
+        return image
+    return f"{settings.erpnext_base_url}{image}"
 
 
 async def _scoped_prices_by_item_code(
@@ -403,7 +415,7 @@ async def list_distributor_products(
                 "item_name": item["item_name"],
                 "item_group": item["item_group"],
                 "has_variants": bool(item.get("has_variants")),
-                "image": item.get("image") or None,
+                "image": _resolve_image_url(item.get("image")),
                 "total_stock": max(0, raw_stock),  # negative projected_qty reads as 0 to a shopper
                 "stock_status": stock_status(raw_stock),
                 "price": min(prices) if prices else None,
@@ -458,7 +470,7 @@ async def list_distributor_variants(item_code: str, *, customer: str) -> dict[st
         "item_code": item["item_code"],
         "item_name": item.get("item_name"),
         "has_variants": bool(item.get("has_variants")),
-        "image": item.get("image") or None,
+        "image": _resolve_image_url(item.get("image")),
         "variants": variants,
     }
 
@@ -521,7 +533,7 @@ async def get_product_detail(item_code: str) -> dict[str, Any]:
         "item_name": item.get("item_name"),
         "item_group": item.get("item_group"),
         "description": item.get("description"),
-        "image": item.get("image"),
+        "image": _resolve_image_url(item.get("image")),
         "has_variants": bool(item.get("has_variants")),
         "variants": variants,
         "specifications": _extract_specifications(item),
