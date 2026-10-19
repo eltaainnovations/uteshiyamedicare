@@ -133,7 +133,7 @@ export function ProductCard({ product }: { product: PortalProduct }) {
     <div className="bg-white dark:bg-[#1A1D2E] rounded-[12px] border border-gray-100 dark:border-[#252836] shadow-sm overflow-hidden hover:shadow-md dark:hover:border-[#353848] transition">
       <div className="relative h-36 bg-gradient-to-br from-gray-50 to-gray-100 dark:from-[#161921] dark:to-[#1A1D2E] flex items-center justify-center">
         {product.image ? (
-          <img src={product.image} alt={product.itemName} className="w-full h-full object-cover" />
+          <img src={product.image} alt={product.itemName} className="w-full h-full object-contain p-2" />
         ) : (
           <Package size={40} className="text-gray-300 dark:text-[#353848]" />
         )}
