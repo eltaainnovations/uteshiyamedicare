@@ -67,8 +67,21 @@ def _mask_email(email: str) -> str:
     return f"{masked}@{domain}"
 
 
-def _deliver_otp(email: str, code: str) -> None:
-    email_service.send_email(email, "Your Uteshiya Medicare Portal login code", f"Your 2FA code is: {code}")
+def _deliver_otp(email: str, code: str, user_name: str | None = None) -> None:
+    success, error = email_service.send_otp_email(
+        email,
+        code,
+        user_name=user_name,
+        expires_in_minutes=settings.otp_ttl_minutes,
+    )
+    if not success:
+        logger.error("Failed to deliver OTP to %s: %s", email, error)
+        config = settings_service.get_email_config_internal()
+        if config.get("smtp_host"):
+            raise HTTPException(
+                status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Could not send OTP to email: {error or 'SMTP delivery failed'}. Please contact your administrator.",
+            )
 
 
 def _record_failed_attempt_and_maybe_alert(email_lower: str) -> None:
@@ -194,7 +207,7 @@ def start_2fa_challenge(user: PortalUser, sid: str | None) -> tuple[str, Pending
         encrypted_sid=encrypt_sid(sid) if sid is not None else None,
     )
     _pending_challenges[challenge_id] = challenge
-    _deliver_otp(user.email, code)
+    _deliver_otp(user.email, code, user_name=user.name)
     return challenge_id, challenge
 
 
