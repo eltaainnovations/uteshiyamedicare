@@ -36,7 +36,7 @@ export default function CartDrawer() {
                 <div key={line.itemCode} className="flex gap-3 p-4">
                   <div className="w-14 h-14 flex-shrink-0 rounded-[8px] bg-gray-50 dark:bg-[#161921] border border-gray-100 dark:border-[#252836] flex items-center justify-center overflow-hidden">
                     {line.image ? (
-                      <img src={line.image} alt={line.name} className="w-full h-full object-cover" />
+                      <img src={line.image} alt={line.name} className="w-full h-full object-contain p-1" />
                     ) : (
                       <Package size={20} className="text-gray-300 dark:text-[#353848]" />
                     )}

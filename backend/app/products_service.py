@@ -11,6 +11,7 @@ disagree on how a number was derived.
 import asyncio
 from typing import Any
 
+from .config import settings
 from .erpnext_client import ERPNextNotFoundError, erpnext_get_doc, erpnext_get_list
 
 # (erp_field, display label) for fields worth surfacing as "Specifications"
@@ -100,6 +101,17 @@ def stock_status(total: int) -> str:
     if total < STOCK_LOW_THRESHOLD:
         return "low_stock"
     return "in_stock"
+
+
+def _resolve_image_url(image: str | None) -> str | None:
+    """ERPNext's Item.image is site-relative (e.g. "/files/foo.png"), not an
+    absolute URL — resolve it against the ERPNext instance so the frontend
+    (on a different origin) can actually load it."""
+    if not image:
+        return None
+    if image.startswith("http://") or image.startswith("https://"):
+        return image
+    return f"{settings.erpnext_base_url}{image}"
 
 
 async def _scoped_prices_by_item_code(
@@ -278,6 +290,7 @@ async def _fetch_top_level_page(
     page: int,
     page_size: int,
     extra_fields: tuple[str, ...] = (),
+    item_groups: list[str] | None = None,
 ) -> tuple[list[dict[str, Any]], int, list[str], dict[str, list[str]]]:
     """Shared page fetch for both the Admin and Distributor catalogues:
     top-level Item rows + total + full category list + each template's
@@ -286,6 +299,8 @@ async def _fetch_top_level_page(
     filters: list[Any] = [["variant_of", "is", "not set"]]
     if category:
         filters.append(["item_group", "=", category])
+    if item_groups:
+        filters.append(["item_group", "in", item_groups])
     if active_only:
         filters.append(["disabled", "=", 0])
 
@@ -326,6 +341,7 @@ async def list_products(
     active_only: bool = False,
     page: int = 1,
     page_size: int = 20,
+    item_groups: list[str] | None = None,
 ) -> tuple[list[dict[str, Any]], int, list[str]]:
     """Top-level items only (templates + standalone items) — variant rows
     never appear directly in this list. Returns (items, total_matching,
@@ -336,7 +352,12 @@ async def list_products(
     "Active Products" KPI (page_size=20, items discarded, just .total).
     """
     items, total, categories, variants_by_template = await _fetch_top_level_page(
-        search=search, category=category, active_only=active_only, page=page, page_size=page_size
+        search=search,
+        category=category,
+        active_only=active_only,
+        page=page,
+        page_size=page_size,
+        item_groups=item_groups,
     )
     if not items:
         return [], total, categories
@@ -403,7 +424,7 @@ async def list_distributor_products(
                 "item_name": item["item_name"],
                 "item_group": item["item_group"],
                 "has_variants": bool(item.get("has_variants")),
-                "image": item.get("image") or None,
+                "image": _resolve_image_url(item.get("image")),
                 "total_stock": max(0, raw_stock),  # negative projected_qty reads as 0 to a shopper
                 "stock_status": stock_status(raw_stock),
                 "price": min(prices) if prices else None,
@@ -458,7 +479,7 @@ async def list_distributor_variants(item_code: str, *, customer: str) -> dict[st
         "item_code": item["item_code"],
         "item_name": item.get("item_name"),
         "has_variants": bool(item.get("has_variants")),
-        "image": item.get("image") or None,
+        "image": _resolve_image_url(item.get("image")),
         "variants": variants,
     }
 
@@ -521,7 +542,7 @@ async def get_product_detail(item_code: str) -> dict[str, Any]:
         "item_name": item.get("item_name"),
         "item_group": item.get("item_group"),
         "description": item.get("description"),
-        "image": item.get("image"),
+        "image": _resolve_image_url(item.get("image")),
         "has_variants": bool(item.get("has_variants")),
         "variants": variants,
         "specifications": _extract_specifications(item),
