@@ -49,10 +49,18 @@ class Settings(BaseSettings):
     otp_ttl_minutes: int = 5
     otp_resend_cooldown_seconds: int = 30
 
-    # No SMTP integration yet, see PROJECT_CONTEXT.md admin "Email
-    # Management". While true, the 2FA code is logged and echoed back in
-    # the login response instead of emailed.
-    demo_mode: bool = True
+    # When true, /auth/login echoes the 2FA code back in the response (dev_otp)
+    # and logs it, instead of emailing it. Set to False now that real SMTP is active.
+    demo_mode: bool = False
+
+    # Default SMTP configuration for email delivery
+    smtp_host: str = "smtp.gmail.com"
+    smtp_port: int = 587
+    smtp_encryption: str = "TLS"
+    smtp_username: str = "placeorder@uteshiyamedicare.com"
+    smtp_password: str = "aiqjggbzcipsojlf"
+    smtp_from_name: str = "Uteshiya Medicare"
+    smtp_from_email: str = "placeorder@uteshiyamedicare.com"
 
     cors_origins: list[str] = ["http://localhost:5173"]
 

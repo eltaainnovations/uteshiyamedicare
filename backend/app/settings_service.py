@@ -71,15 +71,15 @@ _DEFAULTS: dict[str, dict[str, Any]] = {
         "lockout_email_alert": True,
     },
     "email_config": {
-        "smtp_host": "",
+        "smtp_host": "smtp.gmail.com",
         "smtp_port": 587,
         "encryption": "TLS",
-        "smtp_username": "",
-        "smtp_password": "",
-        "from_name": "",
-        "from_email": "",
-        "reply_to_email": None,
-        "reply_to_name": None,
+        "smtp_username": "placeorder@uteshiyamedicare.com",
+        "smtp_password": "aiqjggbzcipsojlf",
+        "from_name": "Uteshiya Medicare",
+        "from_email": "placeorder@uteshiyamedicare.com",
+        "reply_to_email": "support@uteshiya.com",
+        "reply_to_name": "Uteshiya Support",
     },
     "notification_rules": {
         "welcome_email": True,
@@ -235,7 +235,16 @@ def get_email_config_internal() -> dict[str, Any]:
     """Raw config including the plaintext smtp_password — for
     email_service's own use when actually connecting to SMTP. Never
     exposed through the API; get_email_config() above is the public view."""
-    return _get_category("email_config")
+    cfg = dict(_get_category("email_config"))
+    if not cfg.get("smtp_host") and getattr(settings, "smtp_host", None):
+        cfg["smtp_host"] = settings.smtp_host
+        cfg["smtp_port"] = settings.smtp_port
+        cfg["encryption"] = settings.smtp_encryption
+        cfg["smtp_username"] = settings.smtp_username
+        cfg["smtp_password"] = settings.smtp_password
+        cfg["from_name"] = cfg.get("from_name") or settings.smtp_from_name
+        cfg["from_email"] = cfg.get("from_email") or settings.smtp_from_email
+    return cfg
 
 
 def get_notification_rules() -> NotificationRulesConfig:
