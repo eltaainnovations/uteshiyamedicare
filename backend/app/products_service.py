@@ -290,6 +290,7 @@ async def _fetch_top_level_page(
     page: int,
     page_size: int,
     extra_fields: tuple[str, ...] = (),
+    item_groups: list[str] | None = None,
 ) -> tuple[list[dict[str, Any]], int, list[str], dict[str, list[str]]]:
     """Shared page fetch for both the Admin and Distributor catalogues:
     top-level Item rows + total + full category list + each template's
@@ -298,6 +299,8 @@ async def _fetch_top_level_page(
     filters: list[Any] = [["variant_of", "is", "not set"]]
     if category:
         filters.append(["item_group", "=", category])
+    if item_groups:
+        filters.append(["item_group", "in", item_groups])
     if active_only:
         filters.append(["disabled", "=", 0])
 
@@ -338,6 +341,7 @@ async def list_products(
     active_only: bool = False,
     page: int = 1,
     page_size: int = 20,
+    item_groups: list[str] | None = None,
 ) -> tuple[list[dict[str, Any]], int, list[str]]:
     """Top-level items only (templates + standalone items) — variant rows
     never appear directly in this list. Returns (items, total_matching,
@@ -348,7 +352,12 @@ async def list_products(
     "Active Products" KPI (page_size=20, items discarded, just .total).
     """
     items, total, categories, variants_by_template = await _fetch_top_level_page(
-        search=search, category=category, active_only=active_only, page=page, page_size=page_size
+        search=search,
+        category=category,
+        active_only=active_only,
+        page=page,
+        page_size=page_size,
+        item_groups=item_groups,
     )
     if not items:
         return [], total, categories

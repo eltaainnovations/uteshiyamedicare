@@ -38,14 +38,15 @@ function variantLabel(v: ProductVariant): string {
   return v.itemName
 }
 
+// The admin catalogue only lists sellable stock — not raw materials, capex, etc.
+const CATALOGUE_ITEM_GROUPS = ['Finish Goods', 'Instruments']
+
 export default function ProductCatalogue() {
   const [view, setView] = useState<ViewMode>('list')
-  const [cat, setCat] = useState('All')
   const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
 
   const [products, setProducts] = useState<ProductListItem[]>([])
-  const [categories, setCategories] = useState<string[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState<number>(20)
@@ -68,18 +69,17 @@ export default function ProductCatalogue() {
   useEffect(() => {
     
     setPage(1)
-  }, [search, cat, pageSize])
+  }, [search, pageSize])
 
   useEffect(() => {
     let cancelled = false
     setLoading(true)
     setError(null)
-    fetchProducts({ search: search || undefined, category: cat === 'All' ? undefined : cat, page, pageSize })
+    fetchProducts({ search: search || undefined, itemGroups: CATALOGUE_ITEM_GROUPS, page, pageSize })
       .then((data) => {
         if (cancelled) return
         setProducts(data.items)
         setTotal(data.total)
-        setCategories(data.categories)
       })
       .catch((err: unknown) => {
         if (cancelled) return
@@ -91,7 +91,7 @@ export default function ProductCatalogue() {
     return () => {
       cancelled = true
     }
-  }, [search, cat, page, pageSize])
+  }, [search, page, pageSize])
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
   const rangeStart = total === 0 ? 0 : (page - 1) * pageSize + 1
@@ -362,22 +362,6 @@ export default function ProductCatalogue() {
                 : `Showing ${rangeStart.toLocaleString('en-IN')}–${rangeEnd.toLocaleString('en-IN')} of ${total.toLocaleString('en-IN')} products`}
           </p>
         </div>
-      </div>
-
-      <div className="flex gap-2 overflow-x-auto pb-1">
-        {['All', ...categories].map((c) => (
-          <button
-            key={c}
-            onClick={() => setCat(c)}
-            className={`text-xs font-medium px-3 py-1.5 rounded-full whitespace-nowrap transition ${
-              cat === c
-                ? 'bg-[#147BA6] text-white'
-                : 'bg-white dark:bg-[#1A1D2E] text-gray-600 dark:text-[#8892A4] border border-gray-200 dark:border-[#252836] hover:border-gray-300'
-            }`}
-          >
-            {c}
-          </button>
-        ))}
       </div>
 
       <div className="bg-white dark:bg-[#1A1D2E] rounded-[12px] p-4 border border-gray-100 dark:border-[#252836] shadow-sm flex gap-3 items-center">
