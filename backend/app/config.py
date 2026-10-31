@@ -103,7 +103,7 @@ class Settings(BaseSettings):
                         return [str(x).strip() for x in parsed if x]
                 except Exception:
                     v_str = v_str[1:-1]
-            return [s.strip().strip("'"") for s in v_str.split(",") if s.strip()]
+            return [s.strip().replace("'", "").replace('"', "") for s in v_str.split(",") if s.strip()]
         return ["http://localhost:5173"]
 
     # Token-based ERPNext auth for server-to-server User provisioning
