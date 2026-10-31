@@ -87,6 +87,25 @@ class Settings(BaseSettings):
 
     cors_origins: list[str] = ["http://localhost:5173"]
 
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def _parse_cors_origins(cls, value: object) -> list[str]:
+        # Resilient parser: prevents 502 startup crashes if .env has unquoted or malformed arrays
+        if isinstance(value, list):
+            return [str(v).strip() for v in value if v]
+        if isinstance(value, str):
+            v_str = value.strip()
+            if v_str.startswith("[") and v_str.endswith("]"):
+                try:
+                    import json
+                    parsed = json.loads(v_str)
+                    if isinstance(parsed, list):
+                        return [str(x).strip() for x in parsed if x]
+                except Exception:
+                    v_str = v_str[1:-1]
+            return [s.strip().replace("'", "").replace('"', "") for s in v_str.split(",") if s.strip()]
+        return ["http://localhost:5173"]
+
     # Token-based ERPNext auth for server-to-server User provisioning
     # (Authorization: token <key>:<secret>). Separate from the cookie-based
     # sid flow in erpnext_client.erpnext_login/erpnext_logout — never mix
