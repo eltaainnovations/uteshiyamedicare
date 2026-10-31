@@ -137,7 +137,7 @@ def _generate_temp_password() -> str:
 
 
 def _send_email(to: str, subject: str, body: str) -> None:
-    email_service.send_email(to, subject, body)
+    email_service.send_email(to, subject, body, channel="info")
 
 
 def get_lockout_status(email: str) -> datetime | None:
@@ -611,3 +611,23 @@ async def disable_user(email: str) -> PortalUserRow:
     updated = get_by_email(email)
     assert updated is not None
     return updated
+
+
+def get_distributor_emails_for_customer(customer_id: str) -> list[str]:
+    """Returns all active distributor emails linked to a customer in the portal."""
+    with _get_conn() as conn:
+        cursor = conn.execute(
+            "SELECT email FROM portal_users WHERE erpnext_customer_link = ? AND portal_role = 'distributor' AND status = 'active'",
+            (customer_id,),
+        )
+        return [row[0] for row in cursor.fetchall()]
+
+
+def get_sales_person_emails_for_customer(customer_id: str) -> list[str]:
+    """Returns all active sales person emails linked to a customer in the portal."""
+    with _get_conn() as conn:
+        cursor = conn.execute(
+            "SELECT email FROM portal_users WHERE erpnext_customer_link = ? AND portal_role = 'sales_person' AND status = 'active'",
+            (customer_id,),
+        )
+        return [row[0] for row in cursor.fetchall()]

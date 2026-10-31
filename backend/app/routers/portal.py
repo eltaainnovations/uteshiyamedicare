@@ -19,15 +19,20 @@ from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
+import logging
 from .. import (
     analytics_service,
     distributors_service,
+    email_service,
     end_user_records_service,
     inventory_service,
     maruti_service,
     orders_service,
     products_service,
+    users_service,
 )
+
+logger = logging.getLogger("portal")
 from ..auth_service import PortalUser
 from ..deps import DistributorScope, get_current_distributor, get_current_user
 from ..erpnext_client import (
@@ -229,7 +234,7 @@ async def create_sales_order(
     # straight copy of whatever Uteshiya has configured on that Customer
     # record, per the Customer<->Sales Person relationship doc.
     try:
-        customer_doc = await erpnext_get_doc("Customer", customer, fields=["name", "sales_team"], use_user_token=True)
+        customer_doc = await erpnext_get_doc("Customer", customer, fields=["name", "customer_name", "email_id", "sales_team"], use_user_token=True)
     except ERPNextUnavailableError as exc:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
     sales_team = customer_doc.get("sales_team") or []
@@ -253,6 +258,29 @@ async def create_sales_order(
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     except ERPNextUnavailableError as exc:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
+    # Notify linked distributor(s) that an order is awaiting approval
+    try:
+        dist_emails = users_service.get_distributor_emails_for_customer(customer)
+        if not dist_emails and customer_doc.get("email_id"):
+            dist_emails = [customer_doc["email_id"]]
+
+        grand_total = sum(item["qty"] * item["rate"] for item in order_items)
+        dist_name = customer_doc.get("customer_name") or customer
+        sp_name = scope.user_name or scope.user_email or "Sales Representative"
+
+        for dist_email in dist_emails:
+            email_service.send_order_approval_request_email(
+                to=dist_email,
+                order_name=created["name"],
+                distributor_name=dist_name,
+                sales_person_name=sp_name,
+                items=order_items,
+                grand_total=grand_total,
+                delivery_date=payload.delivery_date.isoformat(),
+            )
+    except Exception as exc:
+        logger.warning("Could not send order approval request email for %s: %s", created["name"], exc)
 
     return SalesOrderCreateOut(name=created["name"], status=created.get("status", "Draft"))
 
@@ -644,7 +672,24 @@ async def approve_order(
     name: str, scope: DistributorScope = Depends(get_current_distributor)
 ) -> PortalOrderActionResponse:
     """Submit the draft Sales Order (docstatus 0 -> 1)."""
-    return await _set_docstatus(name, 1, scope, "approved")
+    res = await _set_docstatus(name, 1, scope, "approved")
+
+    # Notify sales person that the order has been approved
+    try:
+        customer = _scoped_customer(scope)
+        sp_emails = users_service.get_sales_person_emails_for_customer(customer)
+        dist_name = scope.user_name or customer
+        for sp_email in sp_emails:
+            email_service.send_order_status_update_email(
+                to=sp_email,
+                order_name=name,
+                distributor_name=dist_name,
+                status_verb="approved",
+            )
+    except Exception as exc:
+        logger.warning("Could not send order approved email for %s: %s", name, exc)
+
+    return res
 
 
 @router.put("/orders/{name:path}/reject", response_model=PortalOrderActionResponse)
@@ -656,14 +701,30 @@ async def reject_order(
     Draft straight to Cancelled (confirmed live: DocstatusTransitionError),
     so unlike approve_order/cancel_order above, this can't go through
     _set_docstatus — see orders_service.delete_draft_order."""
+    customer = _scoped_customer(scope)
     try:
-        await orders_service.delete_draft_order(name, expected_customer=_scoped_customer(scope))
+        await orders_service.delete_draft_order(name, expected_customer=customer)
     except ERPNextNotFoundError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Order not found") from exc
     except ERPNextValidationError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     except ERPNextUnavailableError as exc:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
+    # Notify sales person that the order has been rejected
+    try:
+        sp_emails = users_service.get_sales_person_emails_for_customer(customer)
+        dist_name = scope.user_name or customer
+        for sp_email in sp_emails:
+            email_service.send_order_status_update_email(
+                to=sp_email,
+                order_name=name,
+                distributor_name=dist_name,
+                status_verb="rejected",
+            )
+    except Exception as exc:
+        logger.warning("Could not send order rejected email for %s: %s", name, exc)
+
     return PortalOrderActionResponse(name=name, docstatus=2, detail="Order rejected")
 
 
