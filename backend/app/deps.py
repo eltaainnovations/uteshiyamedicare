@@ -61,6 +61,8 @@ def require_admin(current: tuple[PortalUser, str] = Depends(get_current_user)) -
 class DistributorScope:
     role: Literal["distributor", "sales_person"]
     distributor_ids: list[str]  # 1 item for "distributor", N for "sales_person"
+    user_email: str = ""
+    user_name: str = ""
 
 
 def get_current_distributor(current: tuple[PortalUser, str] = Depends(get_current_user)) -> DistributorScope:
@@ -81,4 +83,4 @@ def get_current_distributor(current: tuple[PortalUser, str] = Depends(get_curren
     if not ids:
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail="No linked distributor found for this account")
 
-    return DistributorScope(role=user.role, distributor_ids=ids)
+    return DistributorScope(role=user.role, distributor_ids=ids, user_email=user.email, user_name=user.name or user.email)

@@ -1,10 +1,15 @@
+from pathlib import Path
 from cryptography.fernet import Fernet
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=(Path(__file__).resolve().parent.parent / ".env", ".env"),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
     jwt_secret: str = "dev-only-secret-change-me"
     jwt_algorithm: str = "HS256"
@@ -54,13 +59,31 @@ class Settings(BaseSettings):
     demo_mode: bool = False
 
     # Default SMTP configuration for email delivery
-    smtp_host: str = "smtp.gmail.com"
-    smtp_port: int = 587
+    smtp_host: str = "smtp-relay.brevo.com"
+    smtp_port: int = 2525
     smtp_encryption: str = "TLS"
-    smtp_username: str = "placeorder@uteshiyamedicare.com"
-    smtp_password: str = "aiqjggbzcipsojlf"
+    smtp_username: str = "c0ab63001@smtp-brevo.com"
+    smtp_password: str = ""
     smtp_from_name: str = "Uteshiya Medicare"
-    smtp_from_email: str = "placeorder@uteshiyamedicare.com"
+    smtp_from_email: str = "info@uteshiyamedicare.com"
+
+    # Info Channel Credentials (OTP, Welcome, Reset Password, Account Alerts)
+    smtp_info_host: str = "smtp-relay.brevo.com"
+    smtp_info_port: int = 2525
+    smtp_info_encryption: str = "TLS"
+    smtp_info_username: str = "c0ab63001@smtp-brevo.com"
+    smtp_info_password: str = ""
+    smtp_info_name: str = "Uteshiya Medicare"
+    smtp_info_email: str = "info@uteshiyamedicare.com"
+
+    # Orders Channel Credentials (Order Approvals, Order Status Notifications)
+    smtp_orders_host: str = "smtp-relay.brevo.com"
+    smtp_orders_port: int = 2525
+    smtp_orders_encryption: str = "TLS"
+    smtp_orders_username: str = "c0a4b1001@smtp-brevo.com"
+    smtp_orders_password: str = ""
+    smtp_orders_name: str = "Uteshiya Medicare Orders"
+    smtp_orders_email: str = "placeorder@uteshiyamedicare.com"
 
     cors_origins: list[str] = ["http://localhost:5173"]
 
