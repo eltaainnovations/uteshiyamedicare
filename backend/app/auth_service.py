@@ -68,6 +68,10 @@ def _mask_email(email: str) -> str:
 
 
 def _deliver_otp(email: str, code: str, user_name: str | None = None) -> None:
+    if settings.demo_mode:
+        logger.info("[DEMO MODE] 2FA verification code for %s is: %s", email, code)
+        return
+
     success, error = email_service.send_otp_email(
         email,
         code,
@@ -94,6 +98,7 @@ def _record_failed_attempt_and_maybe_alert(email_lower: str) -> None:
             "Your Portal account has been locked",
             f"Too many failed login attempts. Your account is locked until {newly_locked_until}. "
             "Contact your administrator if this wasn't you.",
+            channel="info",
         )
 
 
