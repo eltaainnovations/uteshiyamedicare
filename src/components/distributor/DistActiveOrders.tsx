@@ -16,6 +16,9 @@ import { fetchActiveOrders, fetchPortalOrderDetail } from '../../api/portalApi'
 import type { OrderDetail, OrderListItem } from '../../api/ordersApi'
 import { ApiError } from '../../types/auth'
 import { formatInr } from '../../utils/currency'
+import Pagination from '../common/Pagination'
+
+const PAGE_SIZE = 10
 
 const STATUS_CONFIG: Record<string, { icon: LucideIcon; cls: string }> = {
   'To Deliver': { icon: Truck, cls: 'bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400' },
@@ -124,7 +127,12 @@ export default function DistActiveOrders() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
+  const [page, setPage] = useState(1)
   const [detailName, setDetailName] = useState<string | null>(null)
+
+  useEffect(() => {
+    setPage(1)
+  }, [search])
 
   function load() {
     setLoading(true)
@@ -143,6 +151,9 @@ export default function DistActiveOrders() {
     const q = search.trim().toLowerCase()
     return q ? orders.filter((o) => o.name.toLowerCase().includes(q)) : orders
   }, [orders, search])
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
+  const pageRows = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
   return (
     <div className="p-5 lg:p-7 space-y-5">
@@ -174,7 +185,7 @@ export default function DistActiveOrders() {
       )}
 
       <div className="space-y-3">
-        {filtered.map((o) => (
+        {pageRows.map((o) => (
           <div
             key={o.name}
             className="bg-white dark:bg-[#1A1D2E] rounded-[12px] border border-gray-100 dark:border-[#252836] shadow-sm p-5 hover:shadow-md transition"
@@ -209,6 +220,15 @@ export default function DistActiveOrders() {
           </div>
         ))}
       </div>
+
+      {!loading && !error && filtered.length > 0 && totalPages > 1 && (
+        <div className="flex items-center justify-between px-5 py-3 bg-white dark:bg-[#1A1D2E] rounded-[12px] border border-gray-100 dark:border-[#252836] shadow-sm">
+          <span className="text-xs text-gray-500 dark:text-[#8892A4]">
+            Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length}
+          </span>
+          <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
+        </div>
+      )}
 
       {detailName && <DetailDrawer name={detailName} onClose={() => setDetailName(null)} />}
     </div>

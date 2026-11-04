@@ -1,9 +1,12 @@
 import { Ban, Building2, CheckCircle, ChevronRight, Mail, MapPin, Phone, Search, ShoppingCart, User } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { fetchMyCustomerDetail, fetchMyCustomers, type PortalCustomerListItem } from '../../api/portalApi'
 import type { DistributorDetail } from '../../api/distributorsApi'
 import { ApiError } from '../../types/auth'
+import Pagination from '../common/Pagination'
+
+const PAGE_SIZE = 20
 
 type StatusFilter = 'All' | 'Active' | 'Disabled'
 
@@ -18,6 +21,11 @@ export default function MyCustomers() {
   const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState<StatusFilter>('All')
+  const [page, setPage] = useState(1)
+
+  useEffect(() => {
+    setPage(1)
+  }, [search, status])
 
   const [items, setItems] = useState<PortalCustomerListItem[]>([])
   const [loading, setLoading] = useState(true)
@@ -75,11 +83,17 @@ export default function MyCustomers() {
     }
   }, [selectedName])
 
-  const filtered = items.filter((c) => {
-    const matchesSearch = c.customerName.toLowerCase().includes(search.toLowerCase())
-    const matchesStatus = status === 'All' || (status === 'Active' ? !c.disabled : c.disabled)
-    return matchesSearch && matchesStatus
-  })
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase()
+    return items.filter((c) => {
+      const matchesSearch = !q || c.customerName.toLowerCase().includes(q)
+      const matchesStatus = status === 'All' || (status === 'Active' ? !c.disabled : c.disabled)
+      return matchesSearch && matchesStatus
+    })
+  }, [items, search, status])
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
+  const pageRows = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
   // ── Detail view ──────────────────────────────────────────────────────
 
@@ -296,7 +310,7 @@ export default function MyCustomers() {
                     </td>
                   </tr>
                 ) : (
-                  filtered.map((c, i) => (
+                  pageRows.map((c, i) => (
                     <tr
                       key={c.name}
                       className={`border-b border-gray-50 dark:border-[#252836] last:border-0 hover:bg-gray-50/50 dark:hover:bg-[#161921]/60 transition-colors ${i % 2 === 1 ? 'bg-gray-50/30 dark:bg-[#161921]/30' : ''}`}
@@ -354,6 +368,14 @@ export default function MyCustomers() {
               </tbody>
             </table>
           </div>
+          {!loading && !error && filtered.length > 0 && (
+            <div className="flex items-center justify-between px-5 py-3 border-t border-gray-100 dark:border-[#252836]">
+              <span className="text-xs text-gray-500 dark:text-[#8892A4]">
+                Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length}
+              </span>
+              <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
+            </div>
+          )}
         </div>
       )}
     </div>
