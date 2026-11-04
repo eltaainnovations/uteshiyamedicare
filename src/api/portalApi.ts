@@ -228,7 +228,7 @@ export interface SalesOrderCreateResult {
 
 export async function createSalesOrder(params: {
   transactionDate: string
-  deliveryDate: string
+  deliveryDate?: string
   items: { itemCode: string; qty: number }[]
 }): Promise<SalesOrderCreateResult> {
   const body = await request<{ name: string; status: string }>('/portal/sales-orders', {
@@ -1068,9 +1068,6 @@ export async function fetchReorderItems(name: string): Promise<ReorderLine[]> {
   }))
 }
 
-export async function cancelPortalOrder(name: string): Promise<void> {
-  await request(`/portal/orders/${encodeURIComponent(name)}/cancel`, { method: 'PUT' })
-}
 
 // --- Track Shipment (Shree Maruti, manual docket) ---------------------
 

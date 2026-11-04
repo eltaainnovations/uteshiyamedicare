@@ -13,6 +13,7 @@ import { ApiError } from '../../types/auth'
 import { formatInr } from '../../utils/currency'
 import Pagination from '../common/Pagination'
 import PageSizeSelect from '../common/PageSizeSelect'
+import QtyInput from '../common/QtyInput'
 
 type SortKey = 'price_asc' | 'price_desc' | 'name_asc'
 
@@ -51,7 +52,7 @@ interface ActiveSku {
 }
 
 export function ProductCard({ product }: { product: PortalProduct }) {
-  const { add, items, openCart } = useCart()
+  const { add, items, openCart, setQty: setCartQty } = useCart()
   const [variants, setVariants] = useState<PortalProductVariant[] | null>(
     variantsCache.get(product.itemCode)?.variants ?? null,
   )
@@ -114,6 +115,13 @@ export function ProductCard({ product }: { product: PortalProduct }) {
   const outOfStock = active.stockStatus === 'out_of_stock'
   const badge = STOCK_BADGE[active.stockStatus]
   const discount = discountPct(active.price, active.listPrice)
+  // Once the SKU is in the cart the card edits that line, not the pending qty.
+  const shownQty = inCartLine?.qty ?? qty
+
+  function changeQty(next: number) {
+    if (inCartLine) setCartQty(inCartLine.itemCode, next)
+    else setQty(next)
+  }
 
   function handleAdd() {
     if (active.price == null || awaitingVariant) return
@@ -203,14 +211,14 @@ export function ProductCard({ product }: { product: PortalProduct }) {
         <div className="flex items-center gap-2 mt-3">
           <div className="flex items-center border border-gray-200 dark:border-[#252836] rounded-[6px] overflow-hidden bg-white dark:bg-[#13161F]">
             <button
-              onClick={() => setQty((q) => Math.max(1, q - 1))}
+              onClick={() => changeQty(Math.max(1, shownQty - 1))}
               className="px-2 py-1 text-gray-500 dark:text-[#8892A4] hover:bg-gray-50 dark:hover:bg-[#1F2233] transition text-sm"
             >
               −
             </button>
-            <span className="px-2 text-xs font-bold text-gray-900 dark:text-[#E8EAF0]">{qty}</span>
+            <QtyInput value={shownQty} onChange={changeQty} className="w-12 text-xs" />
             <button
-              onClick={() => setQty((q) => q + 1)}
+              onClick={() => changeQty(shownQty + 1)}
               className="px-2 py-1 text-gray-500 dark:text-[#8892A4] hover:bg-gray-50 dark:hover:bg-[#1F2233] transition text-sm"
             >
               +
@@ -252,13 +260,11 @@ export function ProductCard({ product }: { product: PortalProduct }) {
 export default function DistProductCatalogue() {
   const { count: cartCount, openCart } = useCart()
 
-  const [cat, setCat] = useState('All')
   const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
   const [sort, setSort] = useState<SortKey>('name_asc')
 
   const [products, setProducts] = useState<PortalProduct[]>([])
-  const [categories, setCategories] = useState<string[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
@@ -272,7 +278,7 @@ export default function DistProductCatalogue() {
 
   useEffect(() => {
     setPage(1)
-  }, [search, cat, pageSize])
+  }, [search, pageSize])
 
   useEffect(() => {
     let cancelled = false
@@ -280,7 +286,6 @@ export default function DistProductCatalogue() {
     setError(null)
     fetchPortalProducts({
       search: search || undefined,
-      category: cat === 'All' ? undefined : cat,
       page,
       pageSize,
     })
@@ -288,7 +293,6 @@ export default function DistProductCatalogue() {
         if (cancelled) return
         setProducts(data.items)
         setTotal(data.total)
-        setCategories(data.categories)
       })
       .catch((err: unknown) => {
         if (cancelled) return
@@ -300,7 +304,7 @@ export default function DistProductCatalogue() {
     return () => {
       cancelled = true
     }
-  }, [search, cat, page, pageSize])
+  }, [search, page, pageSize])
 
   // Client-side sort of the current page. Price isn't an ERPNext Item
   // column, so it can't be a server order_by — and the page is what the
@@ -360,22 +364,6 @@ export default function DistProductCatalogue() {
           ))}
         </select>
         <PageSizeSelect value={pageSize} onChange={setPageSize} label="Products per page" />
-      </div>
-
-      <div className="flex gap-2 overflow-x-auto pb-1">
-        {['All', ...categories].map((c) => (
-          <button
-            key={c}
-            onClick={() => setCat(c)}
-            className={`text-xs font-medium px-3 py-1.5 rounded-full whitespace-nowrap transition ${
-              cat === c
-                ? 'bg-[#147BA6] text-white'
-                : 'bg-white dark:bg-[#1A1D2E] text-gray-600 dark:text-[#8892A4] border border-gray-200 dark:border-[#252836] hover:border-gray-300 dark:hover:border-[#353848]'
-            }`}
-          >
-            {c}
-          </button>
-        ))}
       </div>
 
       {error && (

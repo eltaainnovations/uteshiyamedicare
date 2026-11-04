@@ -20,7 +20,7 @@ const DIST_ACTIVE_ORDERS_BADGE_CACHE_KEY = 'nav:dist-active-orders-count'
 const REFRESH_EVENT = 'dist-active-orders-badge-refresh'
 
 /** Call after an action that changes this distributor's Active Orders count
- * (currently: cancelling an order) so the sidebar badge updates immediately
+ * (currently: placing an order) so the sidebar badge updates immediately
  * instead of waiting for the next full reload. */
 export function refreshDistributorActiveOrdersBadge(): void {
   clearAsyncDataCache(DIST_ACTIVE_ORDERS_BADGE_CACHE_KEY)
