@@ -193,24 +193,35 @@ async def sync_inventory_credits(customer_id: str) -> None:
             conn.close()
 
 
+_ITEM_META_CACHE: dict[str, dict[str, Any]] = {}
+
+
 async def item_meta(item_codes: list[str]) -> dict[str, dict[str, Any]]:
-    """item_code -> {item_name, item_group, stock_uom} via one bulk Item
-    lookup (catalogue-scoped token, like the rest of products_service).
-    Shared with end_user_records_service for its item_name resolution."""
+    """item_code -> {item_name, item_group, stock_uom} via bulk Item lookup.
+    Cached in memory so repeated inventory views and end-user record listings
+    never re-query static Item metadata from ERPNext.
+    """
     if not item_codes:
         return {}
-    batches = await asyncio.gather(
-        *[
-            erpnext_get_list(
-                "Item",
-                filters=[["item_code", "in", chunk]],
-                fields=["item_code", "item_name", "item_group", "stock_uom"],
-                limit_page_length=0,
-            )
-            for chunk in _chunk(item_codes)
-        ]
-    )
-    return {row["item_code"]: row for rows in batches for row in rows}
+
+    missing = [c for c in item_codes if c not in _ITEM_META_CACHE]
+    if missing:
+        batches = await asyncio.gather(
+            *[
+                erpnext_get_list(
+                    "Item",
+                    filters=[["item_code", "in", chunk]],
+                    fields=["item_code", "item_name", "item_group", "stock_uom"],
+                    limit_page_length=0,
+                )
+                for chunk in _chunk(missing)
+            ]
+        )
+        for rows in batches:
+            for row in rows:
+                _ITEM_META_CACHE[row["item_code"]] = row
+
+    return {code: _ITEM_META_CACHE[code] for code in item_codes if code in _ITEM_META_CACHE}
 
 
 async def list_inventory(customer_id: str) -> list[dict[str, Any]]:
