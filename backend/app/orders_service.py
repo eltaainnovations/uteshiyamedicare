@@ -12,6 +12,7 @@ that's just the normal transient-failure path now, not a standing gap.
 """
 
 import asyncio
+import logging
 from datetime import date
 from typing import Any
 
@@ -24,6 +25,10 @@ from .erpnext_client import (
     erpnext_get_list,
     erpnext_update_doc,
 )
+
+logger = logging.getLogger("orders")
+
+
 
 _LIST_FIELDS = ["name", "customer", "customer_name", "transaction_date", "delivery_date", "status", "grand_total"]
 
@@ -208,14 +213,15 @@ async def completed_orders_summary(
         key=lambda o: (o.get("delivery_date") or o.get("transaction_date") or ""),
         reverse=True,
     )
-    names_by_order, invoices = await asyncio.gather(
-        _item_names_by_order([o["name"] for o in rows]),
-        asyncio.gather(*[_find_linked_invoice(o["name"], customer) for o in rows]),
+    order_names = [o["name"] for o in rows]
+    names_by_order, invoices_by_order = await asyncio.gather(
+        _item_names_by_order(order_names),
+        _find_linked_invoices_batch(order_names, customer),
     )
 
     items = [
-        {**o, "item_names": names_by_order.get(o["name"], []), "invoice": invoice}
-        for o, invoice in zip(rows, invoices)
+        {**o, "item_names": names_by_order.get(o["name"], []), "invoice": invoices_by_order.get(o["name"])}
+        for o in rows
     ]
     total_value = sum(o["grand_total"] for o in rows)
     return {
@@ -403,36 +409,46 @@ async def outstanding_for_customer(customer: str) -> dict[str, Any]:
     return {"outstanding": outstanding, "overdue_count": overdue_count, "available": True}
 
 
-async def _find_linked_invoice(order_name: str, customer: str) -> dict[str, Any] | None:
-    """Match against Sales Invoice.items[].sales_order (the standard
-    ERPNext child-row link back to the originating order) — confirmed
-    live against real data as of 2026-09-29: each invoice's items[]
-    reliably carries a single sales_order value. Any failure here
-    (transient ERPNext error) degrades to None rather than failing the
-    whole order detail."""
-    try:
-        invoices = await erpnext_get_list(
-            "Sales Invoice",
-            filters=[["customer", "=", customer]],
-            fields=["name", "status", "grand_total"],
-            limit_page_length=0,
-            use_user_token=True,
-        )
-    except ERPNextUnavailableError:
-        return None
+async def _find_linked_invoices_batch(order_names: list[str], customer: str) -> dict[str, dict[str, Any]]:
+    """Match against Sales Invoice.items[].sales_order via child-table join (`tabSales Invoice Item`.sales_order).
+    Batch fetches linked invoices for all given order names in single/chunked queries instead of
+    fetching every individual invoice document over HTTP (which caused thousands of requests and server timeouts).
+    """
+    if not order_names:
+        return {}
 
-    for inv in invoices:
+    invoices_by_order: dict[str, dict[str, Any]] = {}
+    for chunk in _chunk(order_names):
         try:
-            inv_doc = await erpnext_get_doc("Sales Invoice", inv["name"], use_user_token=True)
-        except ERPNextUnavailableError:
+            invoices = await erpnext_get_list(
+                "Sales Invoice",
+                filters=[
+                    ["customer", "=", customer],
+                    ["Sales Invoice Item", "sales_order", "in", chunk],
+                ],
+                fields=["name", "status", "grand_total", "`tabSales Invoice Item`.sales_order"],
+                limit_page_length=0,
+                use_user_token=True,
+            )
+            for inv in invoices:
+                so = inv.get("sales_order")
+                if so and so not in invoices_by_order:
+                    invoices_by_order[so] = {
+                        "name": inv["name"],
+                        "status": inv["status"],
+                        "grand_total": float(inv.get("grand_total") or 0),
+                    }
+        except ERPNextUnavailableError as exc:
+            logger.warning("Batch invoice lookup failed for customer %s: %s", customer, exc)
             continue
-        if any(row.get("sales_order") == order_name for row in inv_doc.get("items", [])):
-            return {
-                "name": inv["name"],
-                "status": inv["status"],
-                "grand_total": float(inv.get("grand_total") or 0),
-            }
-    return None
+
+    return invoices_by_order
+
+
+async def _find_linked_invoice(order_name: str, customer: str) -> dict[str, Any] | None:
+    """Match against Sales Invoice.items[].sales_order for a single order using the fast batch lookup."""
+    invoices = await _find_linked_invoices_batch([order_name], customer)
+    return invoices.get(order_name)
 
 
 async def get_order_detail(name: str, *, include_invoice: bool = True) -> dict[str, Any]:
