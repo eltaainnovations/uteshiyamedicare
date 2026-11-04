@@ -10,6 +10,7 @@ import { formatInr } from '../../utils/currency'
 import ErrorBlock from '../common/ErrorBlock'
 import PageSizeSelect from '../common/PageSizeSelect'
 import Pagination from '../common/Pagination'
+import QtyInput from '../common/QtyInput'
 
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean)
@@ -118,11 +119,9 @@ function ConfirmDistributorStep({ onContinue }: { onContinue: () => void }) {
 function AddProductsStep({ onBack, onContinue }: { onBack: () => void; onContinue: () => void }) {
   const { items, subtotal, setQty, remove } = useCart()
 
-  const [cat, setCat] = useState('All')
   const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
   const [products, setProducts] = useState<PortalProduct[]>([])
-  const [categories, setCategories] = useState<string[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
@@ -136,18 +135,17 @@ function AddProductsStep({ onBack, onContinue }: { onBack: () => void; onContinu
 
   useEffect(() => {
     setPage(1)
-  }, [search, cat, pageSize])
+  }, [search, pageSize])
 
   useEffect(() => {
     let cancelled = false
     setLoading(true)
     setError(null)
-    fetchPortalProducts({ search: search || undefined, category: cat === 'All' ? undefined : cat, page, pageSize })
+    fetchPortalProducts({ search: search || undefined, page, pageSize })
       .then((data) => {
         if (cancelled) return
         setProducts(data.items)
         setTotal(data.total)
-        setCategories(data.categories)
       })
       .catch((err: unknown) => {
         if (cancelled) return
@@ -159,7 +157,7 @@ function AddProductsStep({ onBack, onContinue }: { onBack: () => void; onContinu
     return () => {
       cancelled = true
     }
-  }, [search, cat, page, pageSize])
+  }, [search, page, pageSize])
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
 
@@ -177,22 +175,6 @@ function AddProductsStep({ onBack, onContinue }: { onBack: () => void; onContinu
             />
           </div>
           <PageSizeSelect value={pageSize} onChange={setPageSize} label="Products per page" />
-        </div>
-
-        <div className="flex gap-2 overflow-x-auto pb-1">
-          {['All', ...categories].map((c) => (
-            <button
-              key={c}
-              onClick={() => setCat(c)}
-              className={`text-xs font-medium px-3 py-1.5 rounded-full whitespace-nowrap transition ${
-                cat === c
-                  ? 'bg-[#147BA6] text-white'
-                  : 'bg-white dark:bg-[#1A1D2E] text-gray-600 dark:text-[#8892A4] border border-gray-200 dark:border-[#252836] hover:border-gray-300 dark:hover:border-[#353848]'
-              }`}
-            >
-              {c}
-            </button>
-          ))}
         </div>
 
         {error && <ErrorBlock message={error} height={160} />}
@@ -248,7 +230,12 @@ function AddProductsStep({ onBack, onContinue }: { onBack: () => void; onContinu
                       >
                         −
                       </button>
-                      <span className="text-[10px] text-gray-400 dark:text-[#5A6075]">× {line.qty}</span>
+                      <span className="text-[10px] text-gray-400 dark:text-[#5A6075]">×</span>
+                      <QtyInput
+                        value={line.qty}
+                        onChange={(q) => setQty(line.itemCode, q)}
+                        className="w-12 text-[10px] border border-gray-200 dark:border-[#252836] rounded-[4px]"
+                      />
                       <button
                         onClick={() => setQty(line.itemCode, line.qty + 1)}
                         className="text-gray-400 dark:text-[#5A6075] hover:text-gray-600 dark:hover:text-[#8892A4] text-xs font-bold px-1"

@@ -6,6 +6,7 @@ Falls back to logging when SMTP isn't configured (no host/username set).
 """
 
 import base64
+import html
 import logging
 from pathlib import Path
 import smtplib
@@ -523,6 +524,193 @@ Orders Desk: placeorder@uteshiyamedicare.com
 
 
 # ==============================================================================
+# Order Confirmation Email Templates (Orders Channel)
+# ==============================================================================
+
+def generate_order_confirmation_email_html(
+    order_name: str,
+    distributor_name: str,
+    items: list[dict[str, Any]],
+    total: float,
+    order_date: str,
+    order_url: str,
+    logo_url: str | None = None,
+) -> str:
+    if logo_url is None:
+        b64 = get_logo_base64()
+        logo_url = f"data:image/png;base64,{b64}" if b64 else "cid:uteshiya_logo"
+
+    safe_order = html.escape(order_name)
+    safe_distributor = html.escape(distributor_name)
+    safe_url = html.escape(order_url, quote=True)
+
+    rows_html = ""
+    for idx, item in enumerate(items):
+        bg = "#ffffff" if idx % 2 == 0 else "#f8fafc"
+        code = html.escape(str(item.get("item_code") or ""))
+        qty = float(item.get("qty") or 0)
+        rate = float(item.get("rate") or 0.0)
+        rows_html += f"""
+        <tr style="background-color: {bg}; border-bottom: 1px solid #eef2f6;">
+          <td style="padding: 10px 12px; font-size: 13px; font-weight: 600; color: #1e293b;">{code}</td>
+          <td style="padding: 10px 12px; font-size: 13px; text-align: center; color: #475569;">{qty:g}</td>
+          <td style="padding: 10px 12px; font-size: 13px; text-align: right; color: #475569;">₹{rate:,.2f}</td>
+          <td style="padding: 10px 12px; font-size: 13px; text-align: right; font-weight: 600; color: #0f172a;">₹{qty * rate:,.2f}</td>
+        </tr>
+        """
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Order Confirmation - {safe_order}</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background-color: #f1f5f9; padding: 40px 15px;">
+    <tr>
+      <td align="center">
+        <!-- Main Card -->
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width: 580px; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08); border: 1px solid #e2e8f0;">
+
+          <!-- Logo Header -->
+          <tr>
+            <td align="center" style="background-color: #ffffff; padding: 28px 32px 20px 32px; border-bottom: 1px solid #eef2f6;">
+              <img src="{logo_url}" alt="Uteshiya Medicare" width="220" style="display: block; width: 220px; max-width: 220px; height: auto; border: 0;" />
+            </td>
+          </tr>
+
+          <!-- Banner -->
+          <tr>
+            <td style="background: linear-gradient(135deg, #147BA6 0%, #1F8A70 100%); padding: 16px 32px; text-align: center;">
+              <p style="margin: 0; font-size: 13px; font-weight: 700; color: #ffffff; letter-spacing: 0.8px; text-transform: uppercase;">
+                Order Confirmed
+              </p>
+              <p style="margin: 4px 0 0 0; font-size: 15px; font-weight: 600; color: #ffffff;">
+                Order #{safe_order}
+              </p>
+            </td>
+          </tr>
+
+          <!-- Content -->
+          <tr>
+            <td style="padding: 32px 32px 24px 32px; color: #1e293b;">
+              <p style="margin: 0 0 14px 0; font-size: 15px; color: #0f172a; font-weight: 600;">
+                Hello {safe_distributor},
+              </p>
+              <p style="margin: 0 0 20px 0; font-size: 14px; line-height: 1.6; color: #475569;">
+                Thank you for your order. It has been placed successfully and is now being processed. Your order details are below.
+              </p>
+
+              <!-- Order Summary Meta Box -->
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 22px;">
+                <tr>
+                  <td style="padding: 12px 16px; font-size: 13px; color: #64748b; width: 50%;">
+                    <strong>Order ID:</strong> <span style="color: #0f172a; font-family: monospace;">{safe_order}</span><br>
+                    <strong>Order Date:</strong> <span style="color: #0f172a;">{order_date}</span>
+                  </td>
+                  <td style="padding: 12px 16px; font-size: 13px; color: #64748b; width: 50%;">
+                    <strong>Status:</strong> <span style="background-color: #d1fae5; color: #065f46; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 700;">CONFIRMED</span>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Items Table -->
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border-collapse: collapse; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; margin-bottom: 24px;">
+                <thead>
+                  <tr style="background-color: #0f172a; color: #ffffff;">
+                    <th style="padding: 10px 12px; font-size: 12px; text-align: left; text-transform: uppercase;">Item / SKU</th>
+                    <th style="padding: 10px 12px; font-size: 12px; text-align: center; text-transform: uppercase;">Qty</th>
+                    <th style="padding: 10px 12px; font-size: 12px; text-align: right; text-transform: uppercase;">Rate</th>
+                    <th style="padding: 10px 12px; font-size: 12px; text-align: right; text-transform: uppercase;">Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows_html}
+                </tbody>
+                <tfoot>
+                  <tr style="background-color: #f0f7fb; border-top: 2px solid #147BA6;">
+                    <td colspan="3" style="padding: 12px; font-size: 14px; font-weight: 700; color: #147BA6; text-align: right;">Total (before taxes):</td>
+                    <td style="padding: 12px; font-size: 16px; font-weight: 800; color: #147BA6; text-align: right;">₹{total:,.2f}</td>
+                  </tr>
+                </tfoot>
+              </table>
+
+              <!-- CTA Button -->
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin: 28px 0 20px 0;">
+                <tr>
+                  <td align="center">
+                    <a href="{safe_url}" style="display: inline-block; background: linear-gradient(135deg, #147BA6 0%, #1F8A70 100%); color: #ffffff; text-decoration: none; font-size: 15px; font-weight: 700; padding: 14px 32px; border-radius: 8px; box-shadow: 0 4px 12px rgba(20, 123, 166, 0.25);">
+                      View Active Orders →
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="margin: 20px 0 0 0; font-size: 12px; color: #94a3b8; text-align: center;">
+                You can follow this order any time by logging in to the Distributor Portal under <strong>Active Orders</strong>.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background-color: #f8fafc; border-top: 1px solid #e2e8f0; padding: 20px 32px; text-align: center;">
+              <p style="margin: 0 0 4px 0; font-size: 12px; color: #64748b;">
+                <strong>Uteshiya Medicare Pvt. Ltd.</strong> · Orders &amp; Distribution Desk
+              </p>
+              <p style="margin: 0; font-size: 11px; color: #94a3b8;">
+                Inquiries: <a href="mailto:placeorder@uteshiyamedicare.com" style="color: #147BA6; text-decoration: none;">placeorder@uteshiyamedicare.com</a>
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>"""
+
+
+def generate_order_confirmation_email_text(
+    order_name: str,
+    distributor_name: str,
+    items: list[dict[str, Any]],
+    total: float,
+    order_date: str,
+    order_url: str,
+) -> str:
+    item_lines = "\n".join(
+        f"- {item.get('item_code')}: Qty {float(item.get('qty') or 0):g} @ ₹{float(item.get('rate') or 0):,.2f}"
+        for item in items
+    )
+    return f"""============================================================
+           UTESHIYA MEDICARE — ORDER CONFIRMED
+============================================================
+
+Hello {distributor_name},
+
+Thank you for your order. It has been placed successfully and is now being processed.
+
+Order ID: {order_name}
+Order Date: {order_date}
+
+Items:
+{item_lines}
+
+Total (before taxes): ₹{total:,.2f}
+
+To follow this order, visit:
+{order_url}
+
+------------------------------------------------------------
+Uteshiya Medicare Pvt. Ltd.
+Orders Desk: placeorder@uteshiyamedicare.com
+"""
+
+
+# ==============================================================================
 # Core Sender with Channel Support
 # ==============================================================================
 
@@ -758,5 +946,42 @@ def send_order_status_update_email(
             grand_total=grand_total,
             order_url=order_url,
         )
+
+    return send_email(to, subject, text_body, html_body=html_body, inline_images=inline_images, channel="orders")
+
+
+def send_order_confirmation_email(
+    to: str,
+    order_name: str,
+    distributor_name: str,
+    items: list[dict[str, Any]],
+    order_date: str,
+) -> tuple[bool, str | None]:
+    """Sends Order Confirmation to the Distributor via placeorder@ channel."""
+    order_url = f"{settings.frontend_base_url}/distributor/active-orders"
+    total = sum(float(item.get("qty") or 0) * float(item.get("rate") or 0) for item in items)
+
+    subject = f"[Uteshiya Medicare] Order Confirmed #{order_name}"
+    text_body = generate_order_confirmation_email_text(
+        order_name=order_name,
+        distributor_name=distributor_name,
+        items=items,
+        total=total,
+        order_date=order_date,
+        order_url=order_url,
+    )
+    logo_bytes = get_logo_bytes()
+    inline_images: dict[str, tuple[bytes, str, str]] | None = None
+    if logo_bytes:
+        inline_images = {"uteshiya_logo": (logo_bytes, "png", "uteshiyamedicare.png")}
+    html_body = generate_order_confirmation_email_html(
+        order_name=order_name,
+        distributor_name=distributor_name,
+        items=items,
+        total=total,
+        order_date=order_date,
+        order_url=order_url,
+        logo_url="cid:uteshiya_logo" if logo_bytes else None,
+    )
 
     return send_email(to, subject, text_body, html_body=html_body, inline_images=inline_images, channel="orders")
