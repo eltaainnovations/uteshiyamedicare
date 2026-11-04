@@ -12,9 +12,8 @@ import {
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { cancelPortalOrder, fetchActiveOrders, fetchPortalOrderDetail } from '../../api/portalApi'
+import { fetchActiveOrders, fetchPortalOrderDetail } from '../../api/portalApi'
 import type { OrderDetail, OrderListItem } from '../../api/ordersApi'
-import { refreshDistributorActiveOrdersBadge } from '../../hooks/useNavBadges'
 import { ApiError } from '../../types/auth'
 import { formatInr } from '../../utils/currency'
 
@@ -30,8 +29,6 @@ const STATUS_CONFIG: Record<string, { icon: LucideIcon; cls: string }> = {
   Cancelled: { icon: XCircle, cls: 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400' },
 }
 const DEFAULT_STATUS = { icon: Clock, cls: 'bg-gray-100 dark:bg-[#252836] text-gray-600 dark:text-[#8892A4]' }
-
-const CANCELLABLE = new Set(['To Deliver', 'To Bill', 'To Deliver and Bill'])
 
 function StatusBadge({ status }: { status: string }) {
   const cfg = STATUS_CONFIG[status] ?? DEFAULT_STATUS
@@ -128,8 +125,6 @@ export default function DistActiveOrders() {
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [detailName, setDetailName] = useState<string | null>(null)
-  const [cancelling, setCancelling] = useState<string | null>(null)
-  const [actionError, setActionError] = useState<string | null>(null)
 
   function load() {
     setLoading(true)
@@ -148,25 +143,6 @@ export default function DistActiveOrders() {
     const q = search.trim().toLowerCase()
     return q ? orders.filter((o) => o.name.toLowerCase().includes(q)) : orders
   }, [orders, search])
-
-  async function handleCancel(name: string) {
-    if (!window.confirm(`Cancel order ${name}? This can't be undone.`)) return
-    setCancelling(name)
-    setActionError(null)
-    try {
-      await cancelPortalOrder(name)
-      refreshDistributorActiveOrdersBadge()
-      await load()
-    } catch (e) {
-      setActionError(
-        e instanceof ApiError
-          ? `${name}: ${e.message}`
-          : `Could not cancel ${name}.`,
-      )
-    } finally {
-      setCancelling(null)
-    }
-  }
 
   return (
     <div className="p-5 lg:p-7 space-y-5">
@@ -188,12 +164,6 @@ export default function DistActiveOrders() {
           />
         </div>
       </div>
-
-      {actionError && (
-        <p className="text-xs text-red-600 bg-red-50 dark:bg-[rgba(220,38,38,0.1)] rounded-[8px] px-3 py-2">
-          {actionError}
-        </p>
-      )}
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 
@@ -235,16 +205,6 @@ export default function DistActiveOrders() {
               >
                 View Details
               </button>
-              {CANCELLABLE.has(o.status) && (
-                <button
-                  onClick={() => handleCancel(o.name)}
-                  disabled={cancelling === o.name}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs border border-red-200 dark:border-red-900/40 rounded-[8px] text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition disabled:opacity-50"
-                >
-                  <XCircle size={12} />
-                  {cancelling === o.name ? 'Cancelling…' : 'Cancel'}
-                </button>
-              )}
             </div>
           </div>
         ))}

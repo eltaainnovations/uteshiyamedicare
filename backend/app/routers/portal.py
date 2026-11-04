@@ -9,7 +9,7 @@ analytics_service / orders_service / distributors_service functions that
 the Admin screens already use, and the catalogue reuses
 products_service's shared page fetch — every endpoint just pins `customer`
 to the scope. The Portal-specific additions are the draft-Sales-Order
-approval queue + submit/cancel actions, and the customer-scoped
+approval queue + submit action, and the customer-scoped
 price / projected-stock resolution on the catalogue (both live in the
 respective service modules, not here).
 """
@@ -17,7 +17,7 @@ respective service modules, not here).
 import asyncio
 from datetime import date, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response, status
 
 import logging
 from .. import (
@@ -191,26 +191,32 @@ async def sales_dashboard(scope: DistributorScope = Depends(get_current_distribu
 
 @router.post("/sales-orders", response_model=SalesOrderCreateOut, status_code=201)
 async def create_sales_order(
-    payload: SalesOrderCreateIn, scope: DistributorScope = Depends(get_current_distributor)
+    payload: SalesOrderCreateIn,
+    background_tasks: BackgroundTasks,
+    scope: DistributorScope = Depends(get_current_distributor),
+    current: tuple[PortalUser, str] = Depends(get_current_user),
 ) -> SalesOrderCreateOut:
-    """Sales Person's Create Order submit — a draft (docstatus 0) Sales
-    Order for their linked distributor, which then shows up in that
-    distributor's existing Pending Approvals queue unchanged.
+    """Creates a Sales Order for the caller's linked distributor.
 
-    Distributor self-order-creation is a separate, not-yet-scoped
-    feature — rejected here rather than silently creating an order a
-    distributor didn't mean to route through their own approval queue.
+    A Sales Person's order stays a draft (docstatus 0) and shows up in that
+    distributor's Pending Approvals queue. A distributor's own checkout is
+    submitted straight away (docstatus 1) so it lands in Active Orders —
+    they'd otherwise be approving their own order. If that submit fails
+    the draft still exists, so this reports status "Draft" rather than an
+    error: a retry would create a duplicate, and the distributor can
+    approve the draft from their dashboard instead.
+
+    Once submitted, the distributor gets a confirmation email. It's sent
+    after the response so a slow or failing SMTP server can't affect the
+    order; email_service logs any failure.
+
+    delivery_date is optional because distributor checkout doesn't ask for
+    one, but ERPNext requires it, so it falls back to transaction_date.
 
     Rates are always resolved server-side via the same customer-scoped
     Item Price lookup the catalogue/reorder use — never trusted from the
-    request — so a Sales Person can't submit an arbitrary price.
+    request — so a caller can't submit an arbitrary price.
     """
-    if scope.role != "sales_person":
-        raise HTTPException(
-            status.HTTP_403_FORBIDDEN,
-            detail="Only a Sales Person can create an order here; distributor self-order creation is not yet supported.",
-        )
-
     customer = _scoped_customer(scope)
     item_codes = [item.item_code for item in payload.items]
     try:
@@ -248,7 +254,7 @@ async def create_sales_order(
         "customer": customer,
         "branch": "CTM",
         "transaction_date": payload.transaction_date.isoformat(),
-        "delivery_date": payload.delivery_date.isoformat(),
+        "delivery_date": (payload.delivery_date or payload.transaction_date).isoformat(),
         "items": order_items,
         "sales_team": sales_team,
     }
@@ -258,6 +264,21 @@ async def create_sales_order(
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     except ERPNextUnavailableError as exc:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
+    if scope.role == "distributor":
+        try:
+            await orders_service.set_order_docstatus(created["name"], 1, expected_customer=customer)
+        except (ERPNextNotFoundError, ERPNextUnavailableError):
+            return SalesOrderCreateOut(name=created["name"], status="Draft")
+        background_tasks.add_task(
+            email_service.send_order_confirmation_email,
+            to=current[0].email,
+            order_name=created["name"],
+            distributor_name=customer_doc.get("customer_name") or current[0].name,
+            items=order_items,
+            order_date=payload.transaction_date.isoformat(),
+        )
+        return SalesOrderCreateOut(name=created["name"], status="Submitted")
 
     # Notify linked distributor(s) that an order is awaiting approval
     try:
@@ -277,7 +298,7 @@ async def create_sales_order(
                 sales_person_name=sp_name,
                 items=order_items,
                 grand_total=grand_total,
-                delivery_date=payload.delivery_date.isoformat(),
+                delivery_date=doc["delivery_date"],
             )
     except Exception as exc:
         logger.warning("Could not send order approval request email for %s: %s", created["name"], exc)
@@ -699,7 +720,7 @@ async def reject_order(
     """Reject a still-draft Sales Order awaiting approval — a real delete,
     not a docstatus change. ERPNext's docstatus lifecycle has no path from
     Draft straight to Cancelled (confirmed live: DocstatusTransitionError),
-    so unlike approve_order/cancel_order above, this can't go through
+    so unlike approve_order above, this can't go through
     _set_docstatus — see orders_service.delete_draft_order."""
     customer = _scoped_customer(scope)
     try:
@@ -728,15 +749,6 @@ async def reject_order(
     return PortalOrderActionResponse(name=name, docstatus=2, detail="Order rejected")
 
 
-@router.put("/orders/{name:path}/cancel", response_model=PortalOrderActionResponse)
-async def cancel_order(
-    name: str, scope: DistributorScope = Depends(get_current_distributor)
-) -> PortalOrderActionResponse:
-    """Cancel a submitted, in-progress Sales Order (docstatus 1 -> 2) —
-    the exact set_order_docstatus PUT the Dashboard's Reject uses. ERPNext
-    rejects the cancel (502 with its message) if the order has linked
-    submitted Delivery Notes / Invoices."""
-    return await _set_docstatus(name, 2, scope, "cancelled")
 
 
 @router.get("/orders/{name:path}/reorder", response_model=PortalReorderResponse)

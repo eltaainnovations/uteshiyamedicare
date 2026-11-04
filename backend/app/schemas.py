@@ -255,7 +255,7 @@ class SalesOrderItemIn(BaseModel):
 
 class SalesOrderCreateIn(BaseModel):
     transaction_date: date
-    delivery_date: date
+    delivery_date: date | None = None  # defaults to transaction_date
     items: list[SalesOrderItemIn] = Field(min_length=1)
 
 

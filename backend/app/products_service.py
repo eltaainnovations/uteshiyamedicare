@@ -256,6 +256,10 @@ async def _variant_codes_by_template(template_codes: list[str]) -> dict[str, lis
     return by_template
 
 
+# The only item_groups distributors and sales staff can browse in the portal.
+PORTAL_ITEM_GROUPS = ["Finish Goods", "Instruments"]
+
+
 async def _all_categories() -> list[str]:
     """Distinct item_group values across every top-level item — deliberately
     unscoped by the current search/category filter, so the pill list stays
@@ -399,7 +403,13 @@ async def list_distributor_products(
     `price`/`list_price` on a template row are the lowest across its
     variants — the "from" price the card shows."""
     items, total, categories, variants_by_template = await _fetch_top_level_page(
-        search=search, category=category, active_only=False, page=page, page_size=page_size, extra_fields=("image",)
+        search=search,
+        category=category,
+        active_only=False,
+        page=page,
+        page_size=page_size,
+        extra_fields=("image",),
+        item_groups=PORTAL_ITEM_GROUPS,
     )
     if not items:
         return [], total, categories
