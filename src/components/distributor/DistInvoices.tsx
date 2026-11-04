@@ -3,6 +3,9 @@ import { useEffect, useMemo, useState } from 'react'
 import { downloadInvoicePdf, fetchPortalInvoices, type PortalInvoice, type PortalInvoiceStats } from '../../api/portalApi'
 import { ApiError } from '../../types/auth'
 import { formatInr } from '../../utils/currency'
+import Pagination from '../common/Pagination'
+
+const PAGE_SIZE = 20
 
 // Real ERPNext Sales Invoice statuses confirmed live on this instance:
 // Draft / Overdue / Cancelled / Return. Paid/Unpaid aren't present in
@@ -29,6 +32,7 @@ export default function DistInvoices() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
+  const [page, setPage] = useState(1)
   const [downloading, setDownloading] = useState<string | null>(null)
   const [downloadError, setDownloadError] = useState<string | null>(null)
 
@@ -54,6 +58,10 @@ export default function DistInvoices() {
     }
   }, [])
 
+  useEffect(() => {
+    setPage(1)
+  }, [search])
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
     if (!q) return invoices
@@ -61,6 +69,9 @@ export default function DistInvoices() {
       (i) => i.name.toLowerCase().includes(q) || (i.salesOrder ?? '').toLowerCase().includes(q),
     )
   }, [invoices, search])
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
+  const pageRows = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
   async function handleDownload(invoice: PortalInvoice) {
     if (!invoice.salesOrder) return
@@ -155,7 +166,7 @@ export default function DistInvoices() {
                   </td>
                 </tr>
               ) : (
-                filtered.map((inv) => (
+                pageRows.map((inv) => (
                   <tr key={inv.name} className="hover:bg-gray-50/60 dark:hover:bg-[#1F2233] transition">
                     <td className="px-5 py-3.5">
                       <div className="flex items-center gap-2">
@@ -202,6 +213,14 @@ export default function DistInvoices() {
             </tbody>
           </table>
         </div>
+        {!loading && !error && filtered.length > 0 && (
+          <div className="flex items-center justify-between px-5 py-3 border-t border-gray-100 dark:border-[#252836]">
+            <span className="text-xs text-gray-500 dark:text-[#8892A4]">
+              Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length}
+            </span>
+            <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
+          </div>
+        )}
       </div>
     </div>
   )
