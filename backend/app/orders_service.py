@@ -45,11 +45,33 @@ def _chunk(names: list[str], size: int = _BATCH_SIZE) -> list[list[str]]:
     return [names[i : i + size] for i in range(0, len(names), size)]
 
 
+_DISTINCT_STATUSES_CACHE: tuple[float, list[str]] | None = None
+
+
 async def distinct_statuses() -> list[str]:
-    rows = await erpnext_get_list(
-        "Sales Order", fields=["status"], group_by="status", limit_page_length=0, use_user_token=True
-    )
-    return sorted(row["status"] for row in rows if row.get("status"))
+    """Distinct Sales Order statuses, cached in memory for 10 minutes to avoid
+    redundant group_by aggregations on every list/filter call.
+    """
+    global _DISTINCT_STATUSES_CACHE
+    import time
+
+    now = time.time()
+    if _DISTINCT_STATUSES_CACHE is not None and now - _DISTINCT_STATUSES_CACHE[0] < 600:
+        return _DISTINCT_STATUSES_CACHE[1]
+
+    try:
+        rows = await erpnext_get_list(
+            "Sales Order", fields=["status"], group_by="status", limit_page_length=0, use_user_token=True
+        )
+        statuses = sorted(row["status"] for row in rows if row.get("status"))
+        if statuses:
+            _DISTINCT_STATUSES_CACHE = (now, statuses)
+            return statuses
+    except Exception:
+        if _DISTINCT_STATUSES_CACHE is not None:
+            return _DISTINCT_STATUSES_CACHE[1]
+        raise
+    return _DISTINCT_STATUSES_CACHE[1] if _DISTINCT_STATUSES_CACHE else []
 
 
 async def _item_counts(order_names: list[str]) -> dict[str, int]:
@@ -77,7 +99,7 @@ async def _item_counts(order_names: list[str]) -> dict[str, int]:
     return counts
 
 
-def _shape_order_rows(orders: list[dict[str, Any]], counts: dict[str, int]) -> list[dict[str, Any]]:
+def _shape_order_rows(orders: list[dict[str, Any]], counts: dict[str, int] | None = None) -> list[dict[str, Any]]:
     return [
         {
             "name": o["name"],
@@ -86,7 +108,7 @@ def _shape_order_rows(orders: list[dict[str, Any]], counts: dict[str, int]) -> l
             "transaction_date": o.get("transaction_date"),
             "delivery_date": o.get("delivery_date"),
             "status": o["status"],
-            "item_count": counts.get(o["name"], 0),
+            "item_count": counts.get(o["name"], 0) if counts else 0,
             "grand_total": float(o.get("grand_total") or 0),
         }
         for o in orders
@@ -145,10 +167,14 @@ def _date_range_filters(from_date: str, to_date: str, customer: str | None) -> l
     return filters
 
 
-async def list_orders_in_range(from_date: str, to_date: str, *, customer: str | None = None) -> list[dict[str, Any]]:
+async def list_orders_in_range(
+    from_date: str, to_date: str, *, customer: str | None = None, include_item_counts: bool = False
+) -> list[dict[str, Any]]:
     """Every Sales Order with transaction_date in [from_date, to_date],
-    unpaginated — for report generation and analytics aggregation, not
-    the paginated screen list."""
+    unpaginated — for report generation and analytics aggregation.
+    Skips the expensive _item_counts child-table queries by default since analytics
+    and reports only aggregate order-level values (status, revenue, dates).
+    """
     orders = await erpnext_get_list(
         "Sales Order",
         filters=_date_range_filters(from_date, to_date, customer),
@@ -156,7 +182,7 @@ async def list_orders_in_range(from_date: str, to_date: str, *, customer: str | 
         limit_page_length=0,
         use_user_token=True,
     )
-    counts = await _item_counts([o["name"] for o in orders])
+    counts = await _item_counts([o["name"] for o in orders]) if include_item_counts else None
     return _shape_order_rows(orders, counts)
 
 
@@ -407,6 +433,47 @@ async def outstanding_for_customer(customer: str) -> dict[str, Any]:
         if inv.get("status") == "Overdue" or (inv.get("due_date") and inv["due_date"] < today)
     )
     return {"outstanding": outstanding, "overdue_count": overdue_count, "available": True}
+
+
+async def list_invoices(customer: str) -> list[dict[str, Any]]:
+    """Fetch all Sales Invoices for a customer with joined Sales Order link.
+    Backs the Distributor Portal's Invoices screen (/distributor/invoices).
+    """
+    rows = await erpnext_get_list(
+        "Sales Invoice",
+        filters=[["customer", "=", customer]],
+        fields=[
+            "name",
+            "customer",
+            "posting_date",
+            "grand_total",
+            "outstanding_amount",
+            "status",
+            "`tabSales Invoice Item`.sales_order as sales_order",
+            "billing_address_gstin",
+            "tax_id",
+        ],
+        order_by="posting_date desc",
+        limit_page_length=0,
+        use_user_token=True,
+    )
+    unique_invoices: dict[str, dict[str, Any]] = {}
+    for inv in rows:
+        name = inv["name"]
+        if name not in unique_invoices:
+            unique_invoices[name] = {
+                "name": name,
+                "sales_order": inv.get("sales_order"),
+                "gstin": inv.get("billing_address_gstin") or inv.get("tax_id"),
+                "posting_date": inv.get("posting_date"),
+                "grand_total": float(inv.get("grand_total") or 0),
+                "outstanding_amount": float(inv.get("outstanding_amount") or 0),
+                "status": inv.get("status") or "Draft",
+            }
+        elif not unique_invoices[name].get("sales_order") and inv.get("sales_order"):
+            unique_invoices[name]["sales_order"] = inv.get("sales_order")
+
+    return list(unique_invoices.values())
 
 
 async def _find_linked_invoices_batch(order_names: list[str], customer: str) -> dict[str, dict[str, Any]]:

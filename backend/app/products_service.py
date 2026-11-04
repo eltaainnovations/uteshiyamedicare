@@ -260,22 +260,38 @@ async def _variant_codes_by_template(template_codes: list[str]) -> dict[str, lis
 PORTAL_ITEM_GROUPS = ["Finish Goods", "Instruments"]
 
 
+_CATEGORIES_CACHE: tuple[float, list[str]] | None = None
+
+
 async def _all_categories() -> list[str]:
-    """Distinct item_group values across every top-level item — deliberately
-    unscoped by the current search/category filter, so the pill list stays
-    complete and stable no matter what page or filter is active. With 8,256
-    products behind pagination, deriving this from "whatever's on the
-    current page" (the original approach) would show only a handful of the
-    ~19 real categories.
+    """Distinct item_group values across every top-level item — cached in-memory
+    for 10 minutes to avoid repeated full-table scans across 8,256 Item rows on
+    every pagination click.
     """
-    rows = await erpnext_get_list(
-        "Item",
-        filters=[["variant_of", "is", "not set"]],
-        fields=["item_group"],
-        group_by="item_group",
-        limit_page_length=0,
-    )
-    return sorted(row["item_group"] for row in rows if row.get("item_group"))
+    global _CATEGORIES_CACHE
+    import time
+
+    now = time.time()
+    if _CATEGORIES_CACHE is not None and now - _CATEGORIES_CACHE[0] < 600:
+        return _CATEGORIES_CACHE[1]
+
+    try:
+        rows = await erpnext_get_list(
+            "Item",
+            filters=[["variant_of", "is", "not set"]],
+            fields=["item_group"],
+            group_by="item_group",
+            limit_page_length=0,
+        )
+        categories = sorted(row["item_group"] for row in rows if row.get("item_group"))
+        if categories:
+            _CATEGORIES_CACHE = (now, categories)
+            return categories
+    except Exception:
+        if _CATEGORIES_CACHE is not None:
+            return _CATEGORIES_CACHE[1]
+        raise
+    return _CATEGORIES_CACHE[1] if _CATEGORIES_CACHE else []
 
 
 def _rollup_codes(item: dict[str, Any], variants_by_template: dict[str, list[str]]) -> list[str]:
