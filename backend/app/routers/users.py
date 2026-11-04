@@ -1,3 +1,5 @@
+from html import escape
+
 from fastapi import APIRouter, Depends, Form, HTTPException, status
 from fastapi.responses import HTMLResponse
 
@@ -79,6 +81,39 @@ async def approve_user(token: str) -> HTMLResponse:
     ok, message = await users_service.approve_and_provision(token)
     title = "User approved" if ok else "Approval failed"
     return HTMLResponse(_page(title, message), status_code=200 if ok else 400)
+
+
+def _reject_form(token: str, record: users_service.PortalUserRow) -> str:
+    who = escape(f"{record.first_name} {record.last_name} <{record.email}>")
+    return f"""<!doctype html>
+<html><head><meta charset="utf-8"><title>Reject user request</title>
+<style>body{{font-family:sans-serif;max-width:480px;margin:80px auto;padding:0 20px;color:#1a1a1a}}
+h1{{font-size:20px}}p{{color:#444;line-height:1.5}}
+button{{width:100%;padding:10px;background:#c0392b;color:#fff;border:0;border-radius:6px;font-size:14px;cursor:pointer}}
+</style></head>
+<body><h1>Reject this user request?</h1>
+<p>{who} was requested as {escape(record.portal_role)}. Rejecting removes the request and no account is created.</p>
+<form method="post" action="/users/reject/{token}"><button type="submit">Reject request</button></form>
+</body></html>"""
+
+
+# GET only shows a confirmation: mail scanners open links in emails, and that
+# must never reject a request by itself.
+@router.get("/reject/{token}", response_class=HTMLResponse)
+def reject_user_form(token: str) -> HTMLResponse:
+    record = users_service.get_draft_by_approval_token(token)
+    if record is None:
+        return HTMLResponse(
+            _page("Rejection failed", "This link is invalid or the request was already processed."), status_code=400
+        )
+    return HTMLResponse(_reject_form(token, record))
+
+
+@router.post("/reject/{token}", response_class=HTMLResponse)
+def reject_user(token: str) -> HTMLResponse:
+    ok, message = users_service.reject_draft(token)
+    title = "Request rejected" if ok else "Rejection failed"
+    return HTMLResponse(_page(title, escape(message)), status_code=200 if ok else 400)
 
 
 def _onboarding_form(token: str, error: str | None = None) -> str:

@@ -19,10 +19,6 @@ function formatFullInr(amount: number): string {
   return `₹${amount.toLocaleString('en-IN')}`
 }
 
-function formatShortInr(amount: number): string {
-  return `₹${(amount / 1000).toFixed(0)}K`
-}
-
 function stockLabel(stock: number): { label: string; badgeCls: string; textCls: string } {
   if (stock === 0) return { label: 'Out of Stock', badgeCls: 'bg-red-100 text-red-700', textCls: 'text-red-600' }
   if (stock <= 5) return { label: 'Low Stock', badgeCls: 'bg-amber-100 text-amber-700', textCls: 'text-amber-600' }
@@ -430,7 +426,7 @@ export default function ProductCatalogue() {
               <table className="w-full">
                 <thead>
                   <tr className="bg-gray-50 dark:bg-[#161921] border-b border-gray-100 dark:border-[#252836]">
-                    {['Item Code', 'Product', 'Category', 'Variants', 'From Price', 'Stock'].map((h) => (
+                    {['Item Code', 'Product', 'Category', 'Variants', 'Price', 'Stock'].map((h) => (
                       <th
                         key={h}
                         className="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-[#5A6075] whitespace-nowrap"
@@ -465,7 +461,7 @@ export default function ProductCatalogue() {
                         </span>
                       </td>
                       <td className="px-4 py-3 text-xs font-semibold text-[#1F8A70]">
-                        {p.fromPrice != null ? `from ${formatShortInr(p.fromPrice)}` : '—'}
+                        {p.fromPrice != null ? formatFullInr(p.fromPrice) : '—'}
                       </td>
                       <td className="px-4 py-3">
                         <span
@@ -512,9 +508,9 @@ export default function ProductCatalogue() {
                 </div>
                 <div className="mt-3 pt-3 border-t border-gray-100 dark:border-[#252836] flex items-center justify-between">
                   <div>
-                    <p className="text-[10px] text-gray-400 dark:text-[#5A6075]">from</p>
+                    <p className="text-[10px] text-gray-400 dark:text-[#5A6075]">Price</p>
                     <p className="text-sm font-bold text-[#1F8A70]">
-                      {p.fromPrice != null ? formatShortInr(p.fromPrice) : '—'}
+                      {p.fromPrice != null ? formatFullInr(p.fromPrice) : '—'}
                     </p>
                   </div>
                   <div className="text-right">

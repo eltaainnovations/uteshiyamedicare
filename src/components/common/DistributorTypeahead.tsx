@@ -13,6 +13,8 @@ interface DistributorTypeaheadProps {
    * more useful than a raw docname when picking a distributor by name/area
    * (e.g. Add User) rather than filtering existing records by it. */
   showTerritory?: boolean
+  /** List the first distributors on focus, before anything is typed. */
+  showInitial?: boolean
   disabled?: boolean
 }
 
@@ -24,6 +26,7 @@ export default function DistributorTypeahead({
   onSelect,
   placeholder = 'Search distributor...',
   showTerritory = false,
+  showInitial = false,
   disabled = false,
 }: DistributorTypeaheadProps) {
   const [query, setQuery] = useState('')
@@ -32,15 +35,19 @@ export default function DistributorTypeahead({
   const [loading, setLoading] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
 
+  const search = query.trim()
+  const wantInitial = showInitial && open && !search
+
   useEffect(() => {
-    if (!query.trim()) {
+    if (!search && !wantInitial) {
       setSuggestions([])
+      setLoading(false)
       return
     }
     let cancelled = false
     setLoading(true)
     const t = window.setTimeout(() => {
-      fetchDistributors({ search: query.trim(), page: 1, pageSize: 8 })
+      fetchDistributors({ search: search || undefined, page: 1, pageSize: search ? 8 : 10 })
         .then((data) => {
           if (!cancelled) setSuggestions(data.items)
         })
@@ -50,12 +57,12 @@ export default function DistributorTypeahead({
         .finally(() => {
           if (!cancelled) setLoading(false)
         })
-    }, 300)
+    }, search ? 300 : 0)
     return () => {
       cancelled = true
       window.clearTimeout(t)
     }
-  }, [query])
+  }, [search, wantInitial])
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -108,9 +115,13 @@ export default function DistributorTypeahead({
         disabled={disabled}
         className="w-full pl-8 pr-4 py-2 text-sm border border-gray-200 dark:border-[#252836] dark:bg-[#13161F] dark:text-[#E8EAF0] rounded-[8px] outline-none focus:border-[#147BA6] transition disabled:opacity-50"
       />
-      {open && query.trim() && (
+      {open && (search || wantInitial) && (
         <div className="absolute z-20 mt-1 w-full max-h-64 overflow-y-auto bg-white dark:bg-[#1A1D2E] border border-gray-100 dark:border-[#252836] rounded-[8px] shadow-lg">
-          {loading && <div className="px-3 py-2 text-xs text-gray-400 dark:text-[#5A6075]">Searching…</div>}
+          {loading && (
+            <div className="px-3 py-2 text-xs text-gray-400 dark:text-[#5A6075]">
+              {search ? 'Searching…' : 'Loading…'}
+            </div>
+          )}
           {!loading && suggestions.length === 0 && (
             <div className="px-3 py-2 text-xs text-gray-400 dark:text-[#5A6075]">No distributors found.</div>
           )}
