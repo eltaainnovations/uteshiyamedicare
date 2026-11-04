@@ -70,8 +70,8 @@ def _get_client() -> httpx.AsyncClient:
     global _client
     if _client is None:
         _client = httpx.AsyncClient(
-            timeout=15.0,
-            limits=httpx.Limits(max_keepalive_connections=20, max_connections=40),
+            timeout=20.0,
+            limits=httpx.Limits(max_keepalive_connections=50, max_connections=100, keepalive_expiry=10.0),
         )
     return _client
 
@@ -94,41 +94,35 @@ async def erpnext_login(usr: str, pwd: str) -> ERPNextSession:
     """POST /api/method/login and return the sid from ERPNext's session cookie.
 
     Never logs the password. The caller owns storing the returned sid
-    server-side only.
+    server-side only. Uses an isolated, dedicated client so authentication
+    is never blocked or starved by background connection pool saturation,
+    and cannot leak session cookies into the shared client.
     """
     url = f"{settings.erpnext_base_url}/api/method/login"
     try:
-        response = await _get_client().post(url, json={"usr": usr, "pwd": pwd})
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.post(url, json={"usr": usr, "pwd": pwd})
+            if response.status_code in (401, 403):
+                raise ERPNextAuthError("ERPNext rejected the credentials")
+
+            if response.status_code != 200:
+                logger.warning("ERPNext login returned unexpected status %s", response.status_code)
+                raise ERPNextUnavailableError(f"ERPNext returned status {response.status_code}")
+
+            body = response.json()
+            if body.get("message") != "Logged In":
+                raise ERPNextAuthError("ERPNext did not confirm login")
+
+            sid = response.cookies.get("sid")
+            if not sid or sid == "Guest":
+                raise ERPNextUnavailableError("ERPNext login succeeded but returned no session id")
+
+            return ERPNextSession(sid=sid, full_name=body.get("full_name") or usr)
+    except (ERPNextAuthError, ERPNextUnavailableError):
+        raise
     except httpx.HTTPError as exc:
-        logger.warning("ERPNext login request failed: %s", exc)
+        logger.warning("ERPNext login request failed: %s (%s)", type(exc).__name__, exc)
         raise ERPNextUnavailableError("Could not reach ERPNext") from exc
-
-    if response.status_code in (401, 403):
-        raise ERPNextAuthError("ERPNext rejected the credentials")
-
-    if response.status_code != 200:
-        logger.warning("ERPNext login returned unexpected status %s", response.status_code)
-        raise ERPNextUnavailableError(f"ERPNext returned status {response.status_code}")
-
-    body = response.json()
-    if body.get("message") != "Logged In":
-        raise ERPNextAuthError("ERPNext did not confirm login")
-
-    sid = response.cookies.get("sid")
-    # _get_client() is one shared httpx.AsyncClient reused for every call,
-    # for every user, for the life of the process — httpx auto-persists
-    # Set-Cookie into its jar and resends matching cookies on every later
-    # request to the same host. Every other call in this module
-    # authenticates via an explicit Authorization header and never wants
-    # this jar's cookies; left uncleared, this login's sid would silently
-    # ride along on unrelated later requests (including ones meant to run
-    # as the shared API key) and let ERPNext identify the caller as this
-    # user instead. Clear it the instant we've read what we need from it.
-    _get_client().cookies.clear()
-    if not sid or sid == "Guest":
-        raise ERPNextUnavailableError("ERPNext login succeeded but returned no session id")
-
-    return ERPNextSession(sid=sid, full_name=body.get("full_name") or usr)
 
 
 async def erpnext_logout(sid: str) -> None:
@@ -139,15 +133,12 @@ async def erpnext_logout(sid: str) -> None:
     """
     url = f"{settings.erpnext_base_url}/api/method/logout"
     try:
-        response = await _get_client().post(url, cookies={"sid": sid})
-        if response.status_code != 200:
-            logger.warning("ERPNext logout returned status %s", response.status_code)
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(url, cookies={"sid": sid})
+            if response.status_code != 200:
+                logger.warning("ERPNext logout returned status %s", response.status_code)
     except httpx.HTTPError as exc:
-        logger.warning("ERPNext logout request failed: %s", exc)
-    finally:
-        # Same reasoning as erpnext_login: never let a session cookie
-        # linger in the shared client's jar past the call that needed it.
-        _get_client().cookies.clear()
+        logger.warning("ERPNext logout request failed: %s (%s)", type(exc).__name__, exc)
 
 
 async def erpnext_create_user(
