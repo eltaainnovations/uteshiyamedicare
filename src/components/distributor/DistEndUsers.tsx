@@ -11,6 +11,9 @@ import {
   type PortalInventoryItem,
 } from '../../api/portalApi'
 import { ApiError } from '../../types/auth'
+import Pagination from '../common/Pagination'
+
+const PAGE_SIZE = 20
 
 type RatingFilter = 'all' | '5' | 'complications'
 
@@ -474,6 +477,11 @@ export default function DistEndUsers() {
 
   const [search, setSearch] = useState('')
   const [rating, setRating] = useState<RatingFilter>('all')
+  const [page, setPage] = useState(1)
+
+  useEffect(() => {
+    setPage(1)
+  }, [search, rating])
 
   const [showForm, setShowForm] = useState(false)
   const [formPrefill, setFormPrefill] = useState<string | undefined>(undefined)
@@ -523,6 +531,9 @@ export default function DistEndUsers() {
       return matchQ && matchR
     })
   }, [records, search, rating])
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
+  const pageRows = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
   const kpis = [
     { label: 'Total Records Logged', value: String(stats.totalRecords), color: '#147BA6' },
@@ -619,7 +630,7 @@ export default function DistEndUsers() {
               )}
               {!loading &&
                 !error &&
-                filtered.map((r) => (
+                pageRows.map((r) => (
                   <tr
                     key={r.id}
                     className={`hover:bg-gray-50/60 dark:hover:bg-[#1F2233] transition ${r.complication ? 'bg-amber-50/30 dark:bg-[rgba(245,158,11,0.04)]' : ''}`}
@@ -701,6 +712,14 @@ export default function DistEndUsers() {
             </tbody>
           </table>
         </div>
+        {!loading && !error && filtered.length > 0 && (
+          <div className="flex items-center justify-between px-5 py-3 border-t border-gray-100 dark:border-[#252836]">
+            <span className="text-xs text-gray-500 dark:text-[#8892A4]">
+              Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length}
+            </span>
+            <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
+          </div>
+        )}
       </div>
 
       {showForm && (

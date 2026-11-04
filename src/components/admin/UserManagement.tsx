@@ -10,6 +10,9 @@ import {
   type PortalUserStatus,
 } from '../../api/usersApi'
 import { ApiError, type Role } from '../../types/auth'
+import Pagination from '../common/Pagination'
+
+const PAGE_SIZE = 20
 import DistributorTypeahead from '../common/DistributorTypeahead'
 
 const ROLE_OPTIONS: Role[] = ['admin', 'manager', 'distributor', 'sales_person']
@@ -76,6 +79,11 @@ export default function UserManagement() {
   const [search, setSearch] = useState('')
   const [roleFilter, setRoleFilter] = useState<Role | 'All'>('All')
   const [statusFilter, setStatusFilter] = useState<PortalUserStatus | 'All'>('All')
+  const [page, setPage] = useState(1)
+
+  useEffect(() => {
+    setPage(1)
+  }, [search, roleFilter, statusFilter])
 
   const [disablingEmail, setDisablingEmail] = useState<string | null>(null)
   const [rowError, setRowError] = useState<string | null>(null)
@@ -130,6 +138,9 @@ export default function UserManagement() {
       return matchSearch && matchRole && matchStatus
     })
   }, [users, search, roleFilter, statusFilter])
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
+  const pageRows = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
   function openModal(mode: ModalMode) {
     setModalMode(mode)
@@ -310,7 +321,7 @@ export default function UserManagement() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50 dark:divide-[#252836]">
-                {filtered.map((u) => {
+                {pageRows.map((u) => {
                   const si = STATUS_INFO[u.status]
                   const StatusIcon = si.icon
                   const showLink = REQUIRES_LINK.includes(u.portalRole)
@@ -365,6 +376,14 @@ export default function UserManagement() {
               </tbody>
             </table>
           </div>
+          {!error && !loading && filtered.length > 0 && (
+            <div className="flex items-center justify-between px-5 py-3 border-t border-gray-100 dark:border-[#252836]">
+              <span className="text-xs text-gray-500 dark:text-[#8892A4]">
+                Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length}
+              </span>
+              <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
+            </div>
+          )}
         </div>
       )}
 
