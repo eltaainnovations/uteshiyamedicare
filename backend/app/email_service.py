@@ -20,6 +20,9 @@ from .config import settings
 
 logger = logging.getLogger("email")
 
+# Served from the frontend's public/ folder.
+HOSTED_LOGO_FILE = "email-logo.png"
+
 # Primary path explicitly configured for Uteshiya Medicare branding, with reliable fallback paths
 PRIMARY_LOGO_PATH = Path(r"C:\xampp\htdocs\uteshiyamedicare\dist\assets\uteshiyamedicare-BUiiNn6e.png")
 FALLBACK_LOGO_PATHS = [
@@ -56,6 +59,21 @@ def get_logo_base64() -> str | None:
     if data:
         return base64.b64encode(data).decode("ascii")
     return None
+
+
+def _email_logo() -> tuple[str | None, dict[str, tuple[bytes, str, str]] | None]:
+    """(logo_url, inline_images) for a template. Uses the logo hosted with the
+    frontend, because Gmail lists an embedded image as an attachment. A
+    localhost frontend can't be reached by mail clients, so local development
+    still embeds it."""
+    base_url = settings.frontend_base_url.rstrip("/")
+    if "localhost" not in base_url and "127.0.0.1" not in base_url:
+        return f"{base_url}/{HOSTED_LOGO_FILE}", None
+
+    logo_bytes = get_logo_bytes()
+    if not logo_bytes:
+        return None, None
+    return "cid:uteshiya_logo", {"uteshiya_logo": (logo_bytes, "png", "uteshiyamedicare.png")}
 
 
 # ==============================================================================
@@ -711,6 +729,158 @@ Orders Desk: placeorder@uteshiyamedicare.com
 
 
 # ==============================================================================
+# User Approval Email Templates (Info Channel)
+# ==============================================================================
+
+def generate_user_approval_email_html(
+    user_name: str,
+    user_email: str,
+    portal_role: str,
+    linked_distributor: str | None,
+    requested_by: str,
+    approve_url: str,
+    reject_url: str,
+    expires_at: str,
+    logo_url: str | None = None,
+) -> str:
+    if logo_url is None:
+        b64 = get_logo_base64()
+        logo_url = f"data:image/png;base64,{b64}" if b64 else "cid:uteshiya_logo"
+
+    safe_name = html.escape(user_name)
+    safe_email = html.escape(user_email)
+    safe_role = html.escape(portal_role)
+    safe_requested_by = html.escape(requested_by)
+    safe_approve_url = html.escape(approve_url, quote=True)
+    safe_reject_url = html.escape(reject_url, quote=True)
+    distributor_row = (
+        f'<strong>Linked Distributor:</strong> <span style="color: #0f172a;">{html.escape(linked_distributor)}</span><br>'
+        if linked_distributor
+        else ""
+    )
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>New User Approval Required</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background-color: #f1f5f9; padding: 40px 15px;">
+    <tr>
+      <td align="center">
+        <!-- Main Card -->
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width: 580px; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08); border: 1px solid #e2e8f0;">
+
+          <!-- Logo Header -->
+          <tr>
+            <td align="center" style="background-color: #ffffff; padding: 28px 32px 20px 32px; border-bottom: 1px solid #eef2f6;">
+              <img src="{logo_url}" alt="Uteshiya Medicare" width="220" style="display: block; width: 220px; max-width: 220px; height: auto; border: 0;" />
+            </td>
+          </tr>
+
+          <!-- Banner -->
+          <tr>
+            <td style="background: linear-gradient(135deg, #147BA6 0%, #1F8A70 100%); padding: 16px 32px; text-align: center;">
+              <p style="margin: 0; font-size: 13px; font-weight: 700; color: #ffffff; letter-spacing: 0.8px; text-transform: uppercase;">
+                Action Required: New User Approval
+              </p>
+            </td>
+          </tr>
+
+          <!-- Content -->
+          <tr>
+            <td style="padding: 32px 32px 24px 32px; color: #1e293b;">
+              <p style="margin: 0 0 20px 0; font-size: 14px; line-height: 1.6; color: #475569;">
+                A new portal user has been requested. Please review the details below and approve or reject the request. The account is only created once it is approved.
+              </p>
+
+              <!-- User Details Box -->
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 22px;">
+                <tr>
+                  <td style="padding: 14px 16px; font-size: 13px; line-height: 1.8; color: #64748b;">
+                    <strong>Name:</strong> <span style="color: #0f172a;">{safe_name}</span><br>
+                    <strong>Email:</strong> <span style="color: #0f172a;">{safe_email}</span><br>
+                    <strong>Portal Role:</strong> <span style="color: #0f172a;">{safe_role}</span><br>
+                    {distributor_row}<strong>Requested By:</strong> <span style="color: #0f172a;">{safe_requested_by}</span>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- CTA Buttons -->
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin: 28px 0 20px 0;">
+                <tr>
+                  <td align="center">
+                    <a href="{safe_approve_url}" style="display: inline-block; min-width: 130px; background-color: #1F8A70; color: #ffffff; text-decoration: none; font-size: 15px; font-weight: 700; padding: 14px 24px; margin: 4px 6px; border-radius: 8px; text-align: center;">
+                      Approve
+                    </a>
+                    <a href="{safe_reject_url}" style="display: inline-block; min-width: 130px; background-color: #c0392b; color: #ffffff; text-decoration: none; font-size: 15px; font-weight: 700; padding: 14px 24px; margin: 4px 6px; border-radius: 8px; text-align: center;">
+                      Reject
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="margin: 20px 0 0 0; font-size: 12px; color: #94a3b8; text-align: center;">
+                The Approve button expires on {html.escape(expires_at)}. Reject asks you to confirm on the next page.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background-color: #f8fafc; border-top: 1px solid #e2e8f0; padding: 20px 32px; text-align: center;">
+              <p style="margin: 0 0 4px 0; font-size: 12px; color: #64748b;">
+                <strong>Uteshiya Medicare Pvt. Ltd.</strong>
+              </p>
+              <p style="margin: 0; font-size: 11px; color: #94a3b8;">
+                Inquiries: <a href="mailto:info@uteshiyamedicare.com" style="color: #147BA6; text-decoration: none;">info@uteshiyamedicare.com</a>
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>"""
+
+
+def generate_user_approval_email_text(
+    user_name: str,
+    user_email: str,
+    portal_role: str,
+    linked_distributor: str | None,
+    requested_by: str,
+    approve_url: str,
+    reject_url: str,
+    expires_at: str,
+) -> str:
+    distributor_line = f"Linked Distributor: {linked_distributor}\n" if linked_distributor else ""
+    return f"""============================================================
+           UTESHIYA MEDICARE — NEW USER APPROVAL REQUIRED
+============================================================
+
+A new portal user has been requested. The account is only created once it is approved.
+
+Name: {user_name}
+Email: {user_email}
+Portal Role: {portal_role}
+{distributor_line}Requested By: {requested_by}
+
+Approve: {approve_url}
+Reject: {reject_url}
+
+The approve link expires on {expires_at}.
+
+------------------------------------------------------------
+Uteshiya Medicare Pvt. Ltd.
+"""
+
+
+# ==============================================================================
 # Core Sender with Channel Support
 # ==============================================================================
 
@@ -833,22 +1003,13 @@ def send_otp_email(
     """Sends 2FA verification OTP email via info@ channel."""
     subject = f"Your Uteshiya Medicare Login Code: {code}"
     text_body = generate_otp_email_text(code, user_name, expires_in_minutes)
-    logo_bytes = get_logo_bytes()
-    inline_images: dict[str, tuple[bytes, str, str]] | None = None
-    if logo_bytes:
-        inline_images = {"uteshiya_logo": (logo_bytes, "png", "uteshiyamedicare.png")}
-        html_body = generate_otp_email_html(
-            code,
-            user_name=user_name,
-            expires_in_minutes=expires_in_minutes,
-            logo_url="cid:uteshiya_logo",
-        )
-    else:
-        html_body = generate_otp_email_html(
-            code,
-            user_name=user_name,
-            expires_in_minutes=expires_in_minutes,
-        )
+    logo_url, inline_images = _email_logo()
+    html_body = generate_otp_email_html(
+        code,
+        user_name=user_name,
+        expires_in_minutes=expires_in_minutes,
+        logo_url=logo_url,
+    )
 
     return send_email(to, subject, text_body, html_body=html_body, inline_images=inline_images, channel="info")
 
@@ -877,30 +1038,17 @@ def send_order_approval_request_email(
         delivery_date=delivery_date,
         approval_url=approval_url,
     )
-    logo_bytes = get_logo_bytes()
-    inline_images: dict[str, tuple[bytes, str, str]] | None = None
-    if logo_bytes:
-        inline_images = {"uteshiya_logo": (logo_bytes, "png", "uteshiyamedicare.png")}
-        html_body = generate_order_approval_email_html(
-            order_name=order_name,
-            distributor_name=distributor_name,
-            sales_person_name=sales_person_name,
-            items=items,
-            grand_total=grand_total,
-            delivery_date=delivery_date,
-            approval_url=approval_url,
-            logo_url="cid:uteshiya_logo",
-        )
-    else:
-        html_body = generate_order_approval_email_html(
-            order_name=order_name,
-            distributor_name=distributor_name,
-            sales_person_name=sales_person_name,
-            items=items,
-            grand_total=grand_total,
-            delivery_date=delivery_date,
-            approval_url=approval_url,
-        )
+    logo_url, inline_images = _email_logo()
+    html_body = generate_order_approval_email_html(
+        order_name=order_name,
+        distributor_name=distributor_name,
+        sales_person_name=sales_person_name,
+        items=items,
+        grand_total=grand_total,
+        delivery_date=delivery_date,
+        approval_url=approval_url,
+        logo_url=logo_url,
+    )
 
     return send_email(to, subject, text_body, html_body=html_body, inline_images=inline_images, channel="orders")
 
@@ -926,26 +1074,15 @@ def send_order_status_update_email(
         grand_total=grand_total,
         order_url=order_url,
     )
-    logo_bytes = get_logo_bytes()
-    inline_images: dict[str, tuple[bytes, str, str]] | None = None
-    if logo_bytes:
-        inline_images = {"uteshiya_logo": (logo_bytes, "png", "uteshiyamedicare.png")}
-        html_body = generate_order_status_email_html(
-            order_name=order_name,
-            distributor_name=distributor_name,
-            status_verb=status_verb,
-            grand_total=grand_total,
-            order_url=order_url,
-            logo_url="cid:uteshiya_logo",
-        )
-    else:
-        html_body = generate_order_status_email_html(
-            order_name=order_name,
-            distributor_name=distributor_name,
-            status_verb=status_verb,
-            grand_total=grand_total,
-            order_url=order_url,
-        )
+    logo_url, inline_images = _email_logo()
+    html_body = generate_order_status_email_html(
+        order_name=order_name,
+        distributor_name=distributor_name,
+        status_verb=status_verb,
+        grand_total=grand_total,
+        order_url=order_url,
+        logo_url=logo_url,
+    )
 
     return send_email(to, subject, text_body, html_body=html_body, inline_images=inline_images, channel="orders")
 
@@ -970,10 +1107,7 @@ def send_order_confirmation_email(
         order_date=order_date,
         order_url=order_url,
     )
-    logo_bytes = get_logo_bytes()
-    inline_images: dict[str, tuple[bytes, str, str]] | None = None
-    if logo_bytes:
-        inline_images = {"uteshiya_logo": (logo_bytes, "png", "uteshiyamedicare.png")}
+    logo_url, inline_images = _email_logo()
     html_body = generate_order_confirmation_email_html(
         order_name=order_name,
         distributor_name=distributor_name,
@@ -981,7 +1115,37 @@ def send_order_confirmation_email(
         total=total,
         order_date=order_date,
         order_url=order_url,
-        logo_url="cid:uteshiya_logo" if logo_bytes else None,
+        logo_url=logo_url,
     )
 
     return send_email(to, subject, text_body, html_body=html_body, inline_images=inline_images, channel="orders")
+
+
+def send_user_approval_request_email(
+    to: str,
+    user_name: str,
+    user_email: str,
+    portal_role: str,
+    linked_distributor: str | None,
+    requested_by: str,
+    approve_url: str,
+    reject_url: str,
+    expires_at: str,
+) -> tuple[bool, str | None]:
+    """Sends the new-user Approve / Reject request to the admin via info@ channel."""
+    subject = f"[Uteshiya Medicare] Action Required: Approve New User {user_email}"
+    details = {
+        "user_name": user_name,
+        "user_email": user_email,
+        "portal_role": portal_role,
+        "linked_distributor": linked_distributor,
+        "requested_by": requested_by,
+        "approve_url": approve_url,
+        "reject_url": reject_url,
+        "expires_at": expires_at,
+    }
+    text_body = generate_user_approval_email_text(**details)
+    logo_url, inline_images = _email_logo()
+    html_body = generate_user_approval_email_html(**details, logo_url=logo_url)
+
+    return send_email(to, subject, text_body, html_body=html_body, inline_images=inline_images, channel="info")

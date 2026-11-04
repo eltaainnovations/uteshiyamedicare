@@ -493,6 +493,7 @@ export default function UserManagement() {
                         }
                         placeholder="Search distributor by name..."
                         showTerritory
+                        showInitial
                         disabled={createSubmitting}
                       />
                       {formErrors.erpnextCustomerLink && (

@@ -250,11 +250,17 @@ def create_draft(
             raise HTTPException(status.HTTP_409_CONFLICT, detail="A portal user with this email already exists")
 
     approve_url = f"{settings.backend_base_url}/users/approve/{approval_token}"
-    _send_email(
-        settings.admin_approval_email,
-        f"Approve new Portal user: {email}",
-        f"{first_name} {last_name} <{email}> requested as {portal_role}.\n\nApprove: {approve_url}\n"
-        f"This link expires {_iso(approval_expires)}.",
+    reject_url = f"{settings.backend_base_url}/users/reject/{approval_token}"
+    email_service.send_user_approval_request_email(
+        to=settings.admin_approval_email,
+        user_name=f"{first_name} {last_name}",
+        user_email=email,
+        portal_role=portal_role.replace("_", " ").title(),
+        linked_distributor=erpnext_customer_link,
+        requested_by=requested_by_email,
+        approve_url=approve_url,
+        reject_url=reject_url,
+        expires_at=approval_expires.strftime("%d %b %Y, %H:%M UTC"),
     )
 
     record = get_by_email(email)
@@ -408,6 +414,31 @@ async def approve_and_provision(token: str) -> tuple[bool, str]:
         else f"User approved and provisioned. Welcome Email is disabled in Notification Rules — share this link manually: {onboarding_url}"
     )
     return True, message
+
+
+def get_draft_by_approval_token(token: str) -> PortalUserRow | None:
+    with _get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM portal_users WHERE approval_token = ? AND status = 'draft'", (token,)
+        ).fetchone()
+    return _row_to_record(row) if row else None
+
+
+def reject_draft(token: str) -> tuple[bool, str]:
+    """Deletes a still-draft request, which never reached ERPNext, so the
+    email can be requested again. Deliberately ignores token expiry: an
+    expired draft can't be approved, and rejecting is the only way to clear
+    it, since re-adding that email otherwise hits the unique constraint."""
+    record = get_draft_by_approval_token(token)
+    if record is None:
+        return False, "This link is invalid or the request was already processed."
+    with _get_conn() as conn:
+        deleted = conn.execute(
+            "DELETE FROM portal_users WHERE approval_token = ? AND status = 'draft'", (token,)
+        ).rowcount
+    if not deleted:
+        return False, "This link is invalid or the request was already processed."
+    return True, f"The request for {record.email} was rejected. No account was created."
 
 
 def _mark_failed(email: str, reason: str) -> None:
