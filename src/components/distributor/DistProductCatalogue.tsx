@@ -23,10 +23,6 @@ const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: 'name_asc', label: 'Name: A–Z' },
 ]
 
-const STOCK_BADGE: Partial<Record<StockStatus, { label: string; cls: string }>> = {
-  in_stock: { label: 'In Stock', cls: 'bg-green-100 text-green-700' },
-  low_stock: { label: 'Low Stock', cls: 'bg-amber-100 text-amber-700' },
-}
 
 // Variants are fetched per product on demand; cache so paging back and
 // forth (or re-sorting) doesn't refetch. Module-level, cleared on reload.
@@ -112,7 +108,6 @@ export function ProductCard({ product }: { product: PortalProduct }) {
   const awaitingVariant = product.hasVariants && selected == null
   const inCartLine = items.find((i) => i.itemCode === active.itemCode)
   const outOfStock = active.stockStatus === 'out_of_stock'
-  const badge = STOCK_BADGE[active.stockStatus]
   const discount = discountPct(active.price, active.listPrice)
   // Once the SKU is in the cart the card edits that line, not the pending qty.
   const shownQty = inCartLine?.qty ?? qty
@@ -152,8 +147,7 @@ export function ProductCard({ product }: { product: PortalProduct }) {
       </div>
 
       <div className="p-4">
-        {badge && <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${badge.cls}`}>{badge.label}</span>}
-        <p className="text-xs font-mono text-gray-400 dark:text-[#5A6075] mt-1.5">{product.itemCode}</p>
+        <p className="text-xs font-mono text-gray-400 dark:text-[#5A6075]">{product.itemCode}</p>
         <p className="text-sm font-semibold text-gray-900 dark:text-[#E8EAF0] leading-tight mt-0.5 line-clamp-2">
           {product.itemName}
         </p>
