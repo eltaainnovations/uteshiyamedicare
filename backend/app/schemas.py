@@ -736,6 +736,8 @@ class EndUserRecordFeedbackUpdate(BaseModel):
 class EndUserRecordOut(BaseModel):
     id: int
     record_id: str  # "EUR-0001"
+    customer_id: str | None = None
+    customer_name: str | None = None
     item_code: str
     item_name: str
     quantity: int
@@ -757,11 +759,18 @@ class EndUserRecordStats(BaseModel):
     top_hospital_count: int
     avg_satisfaction: float | None
     complication_alerts: int
+    total_distributors: int | None = None
+
+
+class EndUserDistributorOption(BaseModel):
+    customer_id: str
+    customer_name: str
 
 
 class EndUserRecordListResponse(BaseModel):
     items: list[EndUserRecordOut]
     stats: EndUserRecordStats
+    distributors: list[EndUserDistributorOption] | None = None
 
 
 class PortalCompletedOrderItem(BaseModel):

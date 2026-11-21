@@ -25,6 +25,7 @@ export type Screen =
   | 'product-catalogue'
   | 'orders'
   | 'offers'
+  | 'admin-end-users'
   | 'email-management'
   | 'reports'
   | 'analytics'
@@ -62,6 +63,7 @@ export const screenTitle: Record<Screen, string> = {
   'product-catalogue': 'Product Catalogue',
   orders: 'Orders',
   offers: 'Offers',
+  'admin-end-users': 'End User Records',
   'email-management': 'Email Management',
   reports: 'Reports',
   analytics: 'Analytics',
@@ -92,6 +94,7 @@ export const ADMIN_NAV_ITEMS: NavItem[] = [
   { icon: Package, label: 'Product Catalogue', screen: 'product-catalogue', path: 'product-catalogue' },
   { icon: ShoppingCart, label: 'Orders', screen: 'orders', path: 'orders' },
   { icon: Tag, label: 'Offers', screen: 'offers', path: 'offers' },
+  { icon: ClipboardList, label: 'End User Records', screen: 'admin-end-users', path: 'end-users' },
   { icon: BarChart2, label: 'Reports', screen: 'reports', path: 'reports' },
   { icon: TrendingUp, label: 'Analytics', screen: 'analytics', path: 'analytics' },
   { icon: Settings, label: 'Settings', screen: 'settings', path: 'settings' },

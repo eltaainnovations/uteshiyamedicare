@@ -75,10 +75,31 @@ def init_db() -> None:
 init_db()
 
 
-def _record_out(row: sqlite3.Row, item_names: dict[str, str]) -> dict[str, Any]:
+def _distributor_map() -> dict[str, str]:
+    with _get_conn() as conn:
+        rows = conn.execute(
+            "SELECT erpnext_customer_link, first_name, last_name, email "
+            "FROM portal_users WHERE portal_role = 'distributor' AND erpnext_customer_link IS NOT NULL"
+        ).fetchall()
+    res: dict[str, str] = {}
+    for r in rows:
+        name = f"{r['first_name'] or ''} {r['last_name'] or ''}".strip()
+        res[r["erpnext_customer_link"]] = name or r["email"]
+    return res
+
+
+def _record_out(
+    row: sqlite3.Row,
+    item_names: dict[str, str],
+    customer_names: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    cid = row["customer_id"]
+    cname = (customer_names.get(cid) if customer_names else None) or cid
     return {
         "id": row["id"],
         "record_id": f"EUR-{row['id']:04d}",
+        "customer_id": cid,
+        "customer_name": cname,
         "item_code": row["item_code"],
         "item_name": item_names.get(row["item_code"], row["item_code"]),
         "quantity": row["quantity"],
@@ -189,27 +210,30 @@ def update_feedback(
     return cur.rowcount == 1
 
 
-def _stats(conn: sqlite3.Connection, customer_id: str) -> dict[str, Any]:
+def _stats(conn: sqlite3.Connection, customer_id: str | None = None) -> dict[str, Any]:
+    where = "WHERE customer_id = ?" if customer_id else ""
+    params = (customer_id,) if customer_id else ()
     scalars = conn.execute(
-        """
+        f"""
         SELECT COUNT(*)                                          AS total_records,
                AVG(satisfaction_rating)                          AS avg_satisfaction,
-               SUM(CASE WHEN complication = 1 THEN 1 ELSE 0 END) AS complication_alerts
+               SUM(CASE WHEN complication = 1 THEN 1 ELSE 0 END) AS complication_alerts,
+               COUNT(DISTINCT customer_id)                       AS total_distributors
         FROM end_user_records
-        WHERE customer_id = ?
+        {where}
         """,
-        (customer_id,),
+        params,
     ).fetchone()
     top = conn.execute(
-        """
+        f"""
         SELECT hospital_name, COUNT(*) AS n
         FROM end_user_records
-        WHERE customer_id = ?
+        {where}
         GROUP BY hospital_name
         ORDER BY n DESC, hospital_name ASC
         LIMIT 1
         """,
-        (customer_id,),
+        params,
     ).fetchone()
     return {
         "total_records": scalars["total_records"] or 0,
@@ -219,55 +243,79 @@ def _stats(conn: sqlite3.Connection, customer_id: str) -> dict[str, Any]:
         if scalars["avg_satisfaction"] is not None
         else None,
         "complication_alerts": scalars["complication_alerts"] or 0,
+        "total_distributors": scalars["total_distributors"] or 0,
     }
 
 
-async def get_record(customer_id: str, record_id: int) -> dict[str, Any] | None:
+async def get_record(customer_id: str | None, record_id: int) -> dict[str, Any] | None:
     with _get_conn() as conn:
-        row = conn.execute(
-            "SELECT * FROM end_user_records WHERE id = ? AND customer_id = ?", (record_id, customer_id)
-        ).fetchone()
+        if customer_id:
+            row = conn.execute(
+                "SELECT * FROM end_user_records WHERE id = ? AND customer_id = ?", (record_id, customer_id)
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT * FROM end_user_records WHERE id = ?", (record_id,)
+            ).fetchone()
     if row is None:
         return None
     meta = await inventory_service.item_meta([row["item_code"]])
     names = {row["item_code"]: (meta.get(row["item_code"], {}).get("item_name") or row["item_code"])}
-    return _record_out(row, names)
+    dist_map = _distributor_map()
+    return _record_out(row, names, dist_map)
 
 
 async def list_records(
-    customer_id: str,
+    customer_id: str | None = None,
     *,
     search: str | None = None,
     rating: str | None = None,  # "5" | "complications" | None/"all"
+    is_admin: bool = False,
 ) -> dict[str, Any]:
     """Filtered `items` + `stats` (stats always over the full unfiltered set,
     so the KPI cards don't change when the list is filtered)."""
-    clauses = ["customer_id = ?"]
-    params: list[Any] = [customer_id]
+    clauses: list[str] = []
+    params: list[Any] = []
+    if customer_id:
+        clauses.append("customer_id = ?")
+        params.append(customer_id)
     if search:
         like = f"%{search}%"
         clauses.append(
-            "(doctor_name LIKE ? OR hospital_name LIKE ? OR batch_id LIKE ? "
+            "(doctor_name LIKE ? OR hospital_name LIKE ? OR batch_id LIKE ? OR item_code LIKE ? "
             "OR ('EUR-' || printf('%04d', id)) LIKE ?)"
         )
-        params += [like, like, like, like]
+        params += [like, like, like, like, like]
     if rating == "5":
         clauses.append("satisfaction_rating = 5")
     elif rating == "complications":
         clauses.append("complication = 1")
 
+    where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     with _get_conn() as conn:
         rows = conn.execute(
-            f"SELECT * FROM end_user_records WHERE {' AND '.join(clauses)} ORDER BY id DESC",
+            f"SELECT * FROM end_user_records {where_sql} ORDER BY id DESC",
             params,
         ).fetchall()
-        stats = _stats(conn, customer_id)
+        stats = _stats(conn, customer_id if not is_admin else None)
 
+        dist_rows = conn.execute(
+            "SELECT DISTINCT customer_id FROM end_user_records ORDER BY customer_id ASC"
+        ).fetchall()
+
+    dist_map = _distributor_map()
+    distributors_list = [
+        {"customer_id": r["customer_id"], "customer_name": dist_map.get(r["customer_id"], r["customer_id"])}
+        for r in dist_rows
+    ]
+
+    item_codes = list({r["item_code"] for r in rows})
     item_names = {
         code: (meta.get("item_name") or code)
-        for code, meta in (await inventory_service.item_meta([r["item_code"] for r in rows])).items()
+        for code, meta in (await inventory_service.item_meta(item_codes)).items()
     }
     return {
-        "items": [_record_out(r, item_names) for r in rows],
+        "items": [_record_out(r, item_names, dist_map) for r in rows],
         "stats": stats,
+        "distributors": distributors_list if is_admin else None,
     }

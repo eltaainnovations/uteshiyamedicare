@@ -14,13 +14,23 @@ Three distinct auth modes live here, never mixed in a single call:
 
 import json
 import logging
+import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
 import httpx
 
-from .config import settings
+if __package__ is None or __package__ == "":
+    _pkg_root = str(Path(__file__).resolve().parent.parent)
+    if _pkg_root not in sys.path:
+        sys.path.insert(0, _pkg_root)
+
+try:
+    from .config import settings
+except (ImportError, ValueError):
+    from app.config import settings  # type: ignore
 
 logger = logging.getLogger("erpnext")
 
@@ -100,7 +110,7 @@ async def erpnext_login(usr: str, pwd: str) -> ERPNextSession:
     """
     url = f"{settings.erpnext_base_url}/api/method/login"
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=35.0) as client:
             response = await client.post(url, json={"usr": usr, "pwd": pwd})
             if response.status_code in (401, 403):
                 raise ERPNextAuthError("ERPNext rejected the credentials")

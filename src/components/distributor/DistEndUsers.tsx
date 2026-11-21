@@ -53,22 +53,45 @@ function ComplicationToggle({ value, onChange }: { value: boolean; onChange: (v:
   return (
     <button
       type="button"
+      role="switch"
+      aria-checked={value}
       onClick={() => onChange(!value)}
-      className={`relative w-10 h-5 rounded-full transition-colors ${value ? 'bg-red-500' : 'bg-gray-200 dark:bg-[#252836]'}`}
+      className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-red-500/20 ${
+        value ? 'bg-red-500' : 'bg-gray-200 dark:bg-[#252836]'
+      }`}
     >
       <span
-        className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow-sm transition-transform ${value ? 'translate-x-5' : 'translate-x-0.5'}`}
+        aria-hidden="true"
+        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
+          value ? 'translate-x-5' : 'translate-x-0'
+        }`}
       />
     </button>
   )
 }
 
-function KpiCard({ label, value, color }: { label: string; value: string; color: string }) {
+function KpiCard({
+  label,
+  value,
+  color,
+  loading,
+}: {
+  label: string
+  value: string
+  color: string
+  loading?: boolean
+}) {
   return (
     <div className="bg-white dark:bg-[#1A1D2E] rounded-[12px] p-4 border border-gray-100 dark:border-[#252836] shadow-sm">
-      <p className="text-lg font-bold" style={{ color }}>
-        {value}
-      </p>
+      <div className="h-7 flex items-center">
+        {loading ? (
+          <div className="h-5 w-16 bg-gray-100 dark:bg-[#252836] rounded animate-pulse" />
+        ) : (
+          <p className="text-lg font-bold" style={{ color }}>
+            {value}
+          </p>
+        )}
+      </div>
       <p className="text-xs text-gray-500 dark:text-[#8892A4] mt-0.5 leading-tight">{label}</p>
     </div>
   )
@@ -569,7 +592,7 @@ export default function DistEndUsers() {
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {kpis.map((k) => (
-          <KpiCard key={k.label} {...k} />
+          <KpiCard key={k.label} {...k} loading={loading} />
         ))}
       </div>
 

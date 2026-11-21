@@ -69,6 +69,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const tokenRef = useRef<string | null>(null)
   const idleTimerRef = useRef<number | undefined>(undefined)
   const lastPingRef = useRef(0)
+  const submittingRef = useRef(false)
 
   const endSession = useCallback((notice: boolean) => {
     tokenRef.current = null
@@ -133,6 +134,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const submitCredentials = useCallback(async (email: string, password: string, remember: boolean) => {
+    if (submittingRef.current) return
+    submittingRef.current = true
     setError(null)
     setSessionExpiredNotice(false)
     setIsSubmitting(true)
@@ -144,13 +147,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Unexpected error. Please try again.')
     } finally {
+      submittingRef.current = false
       setIsSubmitting(false)
     }
   }, [])
 
   const submitTwoFactorCode = useCallback(
     async (code: string) => {
-      if (!pendingChallenge) return
+      if (!pendingChallenge || submittingRef.current) return
+      submittingRef.current = true
       setError(null)
       setIsSubmitting(true)
       try {
@@ -163,6 +168,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } catch (err) {
         setError(err instanceof ApiError ? err.message : 'Unexpected error. Please try again.')
       } finally {
+        submittingRef.current = false
         setIsSubmitting(false)
       }
     },
