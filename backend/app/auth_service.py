@@ -1,14 +1,28 @@
 import logging
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from fastapi import HTTPException, status
 
-from . import email_service, settings_service, users_service
-from .config import settings
-from .erpnext_client import ERPNextAuthError, ERPNextUnavailableError, erpnext_login, erpnext_logout
-from .schemas import Role
-from .security import create_access_token, decrypt_sid, encrypt_sid, generate_otp, generate_token_id, verify_password
+if __package__ is None or __package__ == "":
+    _pkg_root = str(Path(__file__).resolve().parent.parent)
+    if _pkg_root not in sys.path:
+        sys.path.insert(0, _pkg_root)
+
+try:
+    from . import email_service, settings_service, users_service
+    from .config import settings
+    from .erpnext_client import ERPNextAuthError, ERPNextUnavailableError, erpnext_login, erpnext_logout
+    from .schemas import Role
+    from .security import create_access_token, decrypt_sid, encrypt_sid, generate_otp, generate_token_id, verify_password
+except (ImportError, ValueError):
+    from app import email_service, settings_service, users_service  # type: ignore
+    from app.config import settings  # type: ignore
+    from app.erpnext_client import ERPNextAuthError, ERPNextUnavailableError, erpnext_login, erpnext_logout  # type: ignore
+    from app.schemas import Role  # type: ignore
+    from app.security import create_access_token, decrypt_sid, encrypt_sid, generate_otp, generate_token_id, verify_password  # type: ignore
 
 logger = logging.getLogger("auth")
 
@@ -136,8 +150,8 @@ async def authenticate_credentials(email: str, password: str) -> tuple[PortalUse
         )
 
     role: Role = record.portal_role
-    sid: str | None
-    full_name: str
+    sid: str | None = None
+    full_name: str = ""
 
     if role == "distributor":
         # No real ERPNext User exists for a Distributor — verify against
@@ -151,17 +165,28 @@ async def authenticate_credentials(email: str, password: str) -> tuple[PortalUse
     else:
         try:
             erpnext_session = await erpnext_login(email, password)
+            sid = erpnext_session.sid
+            full_name = erpnext_session.full_name
         except ERPNextAuthError:
             _record_failed_attempt_and_maybe_alert(email_lower)
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
         except ERPNextUnavailableError as exc:
-            logger.error("ERPNext login unavailable for %s: %s", email, exc)
-            raise HTTPException(
-                status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Authentication service unavailable, please try again",
-            )
-        sid = erpnext_session.sid
-        full_name = erpnext_session.full_name
+            # If ERPNext is unreachable or timing out, allow local password fallback
+            # when user has a locally configured password_hash (e.g. local dev / emergency).
+            if record.password_hash and verify_password(password, record.password_hash):
+                logger.warning(
+                    "ERPNext login unavailable for %s (%s); authenticated via local password fallback",
+                    email,
+                    exc,
+                )
+                sid = None
+                full_name = f"{record.first_name} {record.last_name}".strip() or record.email
+            else:
+                logger.error("ERPNext login unavailable for %s: %s", email, exc)
+                raise HTTPException(
+                    status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Authentication service unavailable, please try again",
+                )
 
     distributor_id: str | None = None
     distributor_ids: list[str] | None = None

@@ -674,6 +674,8 @@ export async function updatePortalThreshold(itemCode: string, threshold: number 
 export interface EndUserRecord {
   id: number
   recordId: string
+  customerId?: string
+  customerName?: string
   itemCode: string
   itemName: string
   quantity: number
@@ -695,6 +697,7 @@ export interface EndUserRecordStats {
   topHospitalCount: number
   avgSatisfaction: number | null
   complicationAlerts: number
+  totalDistributors?: number
 }
 
 export interface EndUserRecordPage {
@@ -724,6 +727,8 @@ export interface EndUserFeedbackInput {
 interface EndUserRecordBody {
   id: number
   record_id: string
+  customer_id?: string
+  customer_name?: string
   item_code: string
   item_name: string
   quantity: number
@@ -743,6 +748,8 @@ function mapRecord(r: EndUserRecordBody): EndUserRecord {
   return {
     id: r.id,
     recordId: r.record_id,
+    customerId: r.customer_id,
+    customerName: r.customer_name,
     itemCode: r.item_code,
     itemName: r.item_name,
     quantity: r.quantity,

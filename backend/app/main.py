@@ -12,6 +12,7 @@ from .maruti_client import aclose_client as aclose_maruti_client
 from .routers.analytics import router as analytics_router
 from .routers.auth import router as auth_router
 from .routers.distributors import router as distributors_router
+from .routers.end_user_records import router as end_user_records_router
 from .routers.offers import router as offers_router
 from .routers.orders import router as orders_router
 from .routers.portal import router as portal_router
@@ -49,6 +50,7 @@ app.include_router(auth_router)
 app.include_router(users_router)
 app.include_router(products_router)
 app.include_router(distributors_router)
+app.include_router(end_user_records_router)
 app.include_router(orders_router)
 app.include_router(offers_router)
 app.include_router(portal_router)

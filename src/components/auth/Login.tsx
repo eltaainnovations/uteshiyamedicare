@@ -1,5 +1,5 @@
 import { Eye, EyeOff, ShieldCheck } from 'lucide-react'
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type ClipboardEvent, type FormEvent, type KeyboardEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import AuthLayout from './AuthLayout'
@@ -44,14 +44,94 @@ export default function Login() {
     void submitCredentials(trimmedEmail, password, rememberMe)
   }
 
-  function handleOtpChange(index: number, value: string) {
-    if (value.length > 1) return
+  useEffect(() => {
+    if (pendingChallenge) {
+      document.getElementById('otp-0')?.focus()
+    }
+  }, [pendingChallenge])
+
+  function handleOtpChange(index: number, rawValue: string) {
+    const cleaned = rawValue.replace(/\D/g, '')
+    if (!cleaned) {
+      const next = [...otp]
+      next[index] = ''
+      setOtp(next)
+      return
+    }
+
+    // If multiple digits entered (e.g. browser autofill or paste into field)
+    if (cleaned.length > 1) {
+      const next = [...otp]
+      for (let i = 0; i < cleaned.length && index + i < OTP_LENGTH; i++) {
+        next[index + i] = cleaned[i]
+      }
+      setOtp(next)
+      const nextIndex = Math.min(index + cleaned.length, OTP_LENGTH - 1)
+      document.getElementById(`otp-${nextIndex}`)?.focus()
+      return
+    }
+
     const next = [...otp]
-    next[index] = value
+    next[index] = cleaned
     setOtp(next)
-    if (value && index < OTP_LENGTH - 1) {
+
+    if (index < OTP_LENGTH - 1) {
       document.getElementById(`otp-${index + 1}`)?.focus()
     }
+  }
+
+  function handleOtpKeyDown(index: number, event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key === 'Backspace') {
+      event.preventDefault()
+      if (otp[index]) {
+        // Clear current box if it has a digit
+        const next = [...otp]
+        next[index] = ''
+        setOtp(next)
+      } else if (index > 0) {
+        // If current box is already empty, clear the previous box and move focus back
+        const next = [...otp]
+        next[index - 1] = ''
+        setOtp(next)
+        document.getElementById(`otp-${index - 1}`)?.focus()
+      }
+    } else if (event.key === 'Delete') {
+      event.preventDefault()
+      if (otp[index]) {
+        const next = [...otp]
+        next[index] = ''
+        setOtp(next)
+      }
+    } else if (event.key === 'ArrowLeft' && index > 0) {
+      event.preventDefault()
+      document.getElementById(`otp-${index - 1}`)?.focus()
+    } else if (event.key === 'ArrowRight' && index < OTP_LENGTH - 1) {
+      event.preventDefault()
+      document.getElementById(`otp-${index + 1}`)?.focus()
+    } else if (event.key === 'Enter') {
+      if (otp.join('').length === OTP_LENGTH && !isSubmitting) {
+        event.preventDefault()
+        handleOtpVerify()
+      }
+    }
+  }
+
+  function handleOtpPaste(event: ClipboardEvent<HTMLInputElement>) {
+    event.preventDefault()
+    const pasted = event.clipboardData.getData('text').replace(/\D/g, '').slice(0, OTP_LENGTH)
+    if (!pasted) return
+    const next = Array(OTP_LENGTH).fill('')
+    for (let i = 0; i < pasted.length; i++) {
+      next[i] = pasted[i]
+    }
+    setOtp(next)
+    const nextFocusIndex = Math.min(pasted.length, OTP_LENGTH - 1)
+    document.getElementById(`otp-${nextFocusIndex}`)?.focus()
+  }
+
+  function handleClearOtp() {
+    setOtp(Array(OTP_LENGTH).fill(''))
+    document.getElementById('otp-0')?.focus()
   }
 
   function handleOtpVerify() {
@@ -192,20 +272,35 @@ export default function Login() {
             </p>
           )}
 
-          <div className="flex gap-2 mb-6">
+          <div className="flex gap-2 mb-2">
             {otp.map((value, index) => (
               <input
                 key={index}
                 id={`otp-${index}`}
                 type="text"
                 inputMode="numeric"
+                autoComplete="one-time-code"
                 maxLength={1}
                 value={value}
                 disabled={isSubmitting}
                 onChange={(event) => handleOtpChange(index, event.target.value)}
+                onKeyDown={(event) => handleOtpKeyDown(index, event)}
+                onPaste={handleOtpPaste}
+                onFocus={(event) => event.target.select()}
                 className="flex-1 min-w-0 h-12 text-center text-lg font-bold border border-gray-300 rounded-[10px] outline-none focus:border-[#147BA6] focus:ring-2 focus:ring-[#147BA6]/10 transition"
               />
             ))}
+          </div>
+
+          <div className="flex justify-end mb-6">
+            <button
+              type="button"
+              onClick={handleClearOtp}
+              disabled={isSubmitting || otp.every((v) => !v)}
+              className="text-xs text-gray-500 hover:text-red-600 disabled:opacity-0 transition font-medium"
+            >
+              Clear code
+            </button>
           </div>
 
           <button
