@@ -3,7 +3,6 @@ import {
   LogOut,
   Menu,
   Moon,
-  Search,
   Settings,
   ShoppingCart,
   Sun,
@@ -74,8 +73,16 @@ export default function Layout({ role, navItems, badges, basePath, onLogout }: L
   const displayName = user?.name ?? ROLE_BADGE[role].fallbackName
   const initials = initialsFromName(displayName)
 
-  const activeItem = navItems.find((item) => location.pathname === `${basePath}/${item.path}`)
-  const currentTitle: string = activeItem ? screenTitle[activeItem.screen as Screen] : ''
+  const activeItem = navItems.find((item) => {
+    const full = `${basePath}/${item.path}`.replace(/\/+/g, '/')
+    return location.pathname === full || location.pathname.startsWith(`${full}/`)
+  })
+  let currentTitle: string = activeItem ? screenTitle[activeItem.screen as Screen] : ''
+  if (!currentTitle) {
+    if (location.pathname.endsWith('/profile')) currentTitle = 'Profile'
+    else if (location.pathname.endsWith('/settings')) currentTitle = 'Settings'
+    else currentTitle = `${ROLE_BADGE[role].fallbackName} Portal`
+  }
 
   const sidebar = (
     <aside
@@ -178,30 +185,22 @@ export default function Layout({ role, navItems, badges, basePath, onLogout }: L
   )
 
   const header = (
-    <header className="flex items-center gap-4 px-4 lg:px-6 h-16 border-b border-gray-200 flex-shrink-0 sticky top-0 z-10 bg-white dark:bg-[#13161F] dark:border-[#252836]">
-      <button
-        onClick={() => setSidebarOpen(true)}
-        className="lg:hidden text-gray-500 hover:text-gray-700 dark:text-[#8892A4] dark:hover:text-[#E8EAF0]"
-      >
-        <Menu size={20} />
-      </button>
+    <header className="flex items-center justify-between gap-4 px-4 lg:px-6 h-16 border-b border-gray-200 flex-shrink-0 sticky top-0 z-10 bg-white dark:bg-[#13161F] dark:border-[#252836]">
+      <div className="flex items-center gap-3 min-w-0">
+        <button
+          onClick={() => setSidebarOpen(true)}
+          className="lg:hidden text-gray-500 hover:text-gray-700 dark:text-[#8892A4] dark:hover:text-[#E8EAF0] p-1 -ml-1 rounded-[6px]"
+          aria-label="Open menu"
+        >
+          <Menu size={20} />
+        </button>
 
-      <div className="hidden lg:block text-sm font-semibold text-gray-900 dark:text-[#E8EAF0]">{currentTitle}</div>
-
-      <div className="flex-1 max-w-md">
-        <div className="relative">
-          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-[#5A6075]" />
-          <input
-            type="text"
-            placeholder="Search products, orders, distributors..."
-            className="w-full pl-9 pr-4 py-2 text-sm border border-gray-200 rounded-[8px] outline-none focus:border-[#147BA6] transition
-              bg-gray-50 dark:bg-[#161921] dark:border-[#252836] dark:text-[#E8EAF0] dark:placeholder-[#5A6075]
-              focus:bg-white dark:focus:bg-[#1A1D2E]"
-          />
-        </div>
+        <h1 className="text-lg lg:text-xl font-bold text-gray-900 dark:text-[#E8EAF0] tracking-tight truncate">
+          {currentTitle}
+        </h1>
       </div>
 
-      <div className="flex items-center gap-1 ml-auto">
+      <div className="flex items-center gap-2">
         <button
           onClick={toggleTheme}
           title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}

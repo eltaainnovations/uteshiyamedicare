@@ -1,5 +1,6 @@
 import { Navigate, Outlet, Route, Routes } from 'react-router-dom'
 import AdminDashboard from './components/admin/AdminDashboard'
+import AdminEndUsers from './components/admin/AdminEndUsers'
 import AdminPortal from './components/admin/AdminPortal'
 import Analytics from './components/admin/Analytics'
 import Distributors from './components/admin/Distributors'
@@ -121,6 +122,8 @@ function AppRoutes() {
                   <Orders />
                 ) : item.screen === 'offers' ? (
                   <Offers />
+                ) : item.screen === 'admin-end-users' ? (
+                  <AdminEndUsers />
                 ) : item.screen === 'reports' ? (
                   <Reports />
                 ) : item.screen === 'analytics' ? (

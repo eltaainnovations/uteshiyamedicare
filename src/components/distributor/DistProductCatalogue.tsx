@@ -77,11 +77,10 @@ export function ProductCard({ product }: { product: PortalProduct }) {
     }
   }, [product.itemCode, product.hasVariants])
 
-  // Default to the first in-stock variant once they load.
+  // Default to the first variant once they load.
   useEffect(() => {
-    if (variants && selectedCode == null) {
-      const firstInStock = variants.find((v) => v.stockStatus !== 'out_of_stock')
-      setSelectedCode((firstInStock ?? variants[0])?.itemCode ?? null)
+    if (variants && selectedCode == null && variants.length > 0) {
+      setSelectedCode(variants[0].itemCode)
     }
   }, [variants, selectedCode])
 
@@ -107,7 +106,6 @@ export function ProductCard({ product }: { product: PortalProduct }) {
   // pick a real SKU first.
   const awaitingVariant = product.hasVariants && selected == null
   const inCartLine = items.find((i) => i.itemCode === active.itemCode)
-  const outOfStock = active.stockStatus === 'out_of_stock'
   const discount = discountPct(active.price, active.listPrice)
   // Once the SKU is in the cart the card edits that line, not the pending qty.
   const shownQty = inCartLine?.qty ?? qty
@@ -163,13 +161,11 @@ export function ProductCard({ product }: { product: PortalProduct }) {
                   <button
                     key={v.itemCode}
                     onClick={() => setSelectedCode(v.itemCode)}
-                    title={v.stockStatus === 'out_of_stock' ? `${variantChipLabel(v)} — Out of Stock` : variantChipLabel(v)}
+                    title={variantChipLabel(v)}
                     className={`text-[10px] px-1.5 py-0.5 rounded-full border transition ${
                       selectedCode === v.itemCode
-                        ? 'border-[#147BA6] bg-[#e8f4fa] dark:bg-[rgba(20,123,166,0.15)] text-[#147BA6]'
-                        : v.stockStatus === 'out_of_stock'
-                          ? 'border-gray-100 dark:border-[#1E2130] text-gray-300 dark:text-[#5A6075] line-through'
-                          : 'border-gray-200 dark:border-[#252836] text-gray-500 dark:text-[#8892A4] hover:border-[#147BA6]'
+                        ? 'border-[#147BA6] bg-[#e8f4fa] dark:bg-[rgba(20,123,166,0.15)] text-[#147BA6] font-semibold'
+                        : 'border-gray-200 dark:border-[#252836] text-gray-600 dark:text-[#8892A4] hover:border-[#147BA6]'
                     }`}
                   >
                     {variantChipLabel(v)}
@@ -218,14 +214,7 @@ export function ProductCard({ product }: { product: PortalProduct }) {
             </button>
           </div>
 
-          {outOfStock ? (
-            <button
-              disabled
-              className="flex-1 py-1.5 text-xs font-semibold rounded-[6px] bg-gray-100 dark:bg-[#1E2130] text-gray-400 dark:text-[#5A6075] cursor-not-allowed"
-            >
-              Unavailable
-            </button>
-          ) : inCartLine ? (
+          {inCartLine ? (
             <button
               onClick={openCart}
               className="flex-1 py-1.5 text-xs font-semibold rounded-[6px] bg-[#e8f4fa] dark:bg-[rgba(20,123,166,0.2)] text-[#147BA6] hover:bg-[#d0ebf7] dark:hover:bg-[rgba(20,123,166,0.3)] transition flex items-center justify-center gap-1"
@@ -233,10 +222,18 @@ export function ProductCard({ product }: { product: PortalProduct }) {
               <ShoppingCart size={11} />
               In Cart ({inCartLine.qty})
             </button>
+          ) : active.price == null ? (
+            <button
+              disabled
+              className="flex-1 py-1.5 text-xs font-semibold rounded-[6px] bg-gray-100 dark:bg-[#1E2130] text-gray-400 dark:text-[#5A6075] cursor-not-allowed"
+              title="Price not configured in ERPNext"
+            >
+              Price not set
+            </button>
           ) : (
             <button
               onClick={handleAdd}
-              disabled={awaitingVariant || active.price == null}
+              disabled={awaitingVariant}
               className="flex-1 py-1.5 text-xs font-semibold rounded-[6px] text-white transition hover:brightness-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1"
               style={{ background: '#147BA6' }}
             >
