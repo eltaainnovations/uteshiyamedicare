@@ -108,7 +108,7 @@ function RecordUsageForm({
 }: {
   prefillItemCode?: string
   onClose: () => void
-  onSaved: () => void
+  onSaved: (newRecord: EndUserRecord) => void
 }) {
   const [stock, setStock] = useState<PortalInventoryItem[] | null>(null)
   const [form, setForm] = useState({
@@ -151,7 +151,7 @@ function RecordUsageForm({
     setSaving(true)
     setError(null)
     try {
-      await createEndUserRecord({
+      const created = await createEndUserRecord({
         itemCode: form.itemCode,
         quantity: Number(form.quantity),
         doctorName: form.doctorName.trim(),
@@ -163,7 +163,7 @@ function RecordUsageForm({
         satisfactionRating: form.satisfactionRating || null,
         complication: form.complication,
       })
-      onSaved()
+      onSaved(created)
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Could not save the record.')
       setSaving(false)
@@ -395,7 +395,7 @@ function FeedbackModal({
 }: {
   record: EndUserRecord
   onClose: () => void
-  onSaved: () => void
+  onSaved: (updated: { id: number; feedbackNotes: string | null; satisfactionRating: number | null; complication: boolean }) => void
 }) {
   const [notes, setNotes] = useState(record.feedbackNotes ?? '')
   const [rating, setRating] = useState(record.satisfactionRating ?? 0)
@@ -407,12 +407,13 @@ function FeedbackModal({
     setSaving(true)
     setError(null)
     try {
-      await updateEndUserFeedback(record.id, {
+      const payload = {
         feedbackNotes: notes.trim() || null,
         satisfactionRating: rating || null,
         complication,
-      })
-      onSaved()
+      }
+      await updateEndUserFeedback(record.id, payload)
+      onSaved({ id: record.id, ...payload })
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Could not save feedback.')
       setSaving(false)
@@ -511,20 +512,24 @@ export default function DistEndUsers() {
   const [viewRecord, setViewRecord] = useState<EndUserRecord | null>(null)
   const [feedbackRecord, setFeedbackRecord] = useState<EndUserRecord | null>(null)
 
-  function load() {
-    setLoading(true)
+  function load(showSpinner = true) {
+    if (showSpinner) setLoading(true)
     setError(null)
     return fetchEndUserRecords()
       .then((data) => {
         setRecords(data.items)
         setStats(data.stats)
       })
-      .catch((err: unknown) => setError(err instanceof ApiError ? err.message : 'Could not load records.'))
-      .finally(() => setLoading(false))
+      .catch((err: unknown) => {
+        if (showSpinner) setError(err instanceof ApiError ? err.message : 'Could not load records.')
+      })
+      .finally(() => {
+        if (showSpinner) setLoading(false)
+      })
   }
 
   useEffect(() => {
-    void load()
+    void load(true)
   }, [])
 
   // Opened from Inventory's "Subtract" — auto-open the form for that item,
@@ -749,9 +754,21 @@ export default function DistEndUsers() {
         <RecordUsageForm
           prefillItemCode={formPrefill}
           onClose={() => setShowForm(false)}
-          onSaved={() => {
+          onSaved={(newRec) => {
             setShowForm(false)
-            void load()
+            if (newRec) {
+              setRecords((prev) => [newRec, ...prev.filter((r) => r.id !== newRec.id)])
+              setStats((prev) => ({
+                ...prev,
+                totalRecords: prev.totalRecords + 1,
+                complicationAlerts: prev.complicationAlerts + (newRec.complication ? 1 : 0),
+                topHospital: prev.topHospital || newRec.hospitalName,
+              }))
+              setSearch('')
+              setRating('all')
+              setPage(1)
+            }
+            void load(false)
           }}
         />
       )}
@@ -760,9 +777,26 @@ export default function DistEndUsers() {
         <FeedbackModal
           record={feedbackRecord}
           onClose={() => setFeedbackRecord(null)}
-          onSaved={() => {
+          onSaved={(updated) => {
             setFeedbackRecord(null)
-            void load()
+            if (updated) {
+              setRecords((prev) =>
+                prev.map((r) =>
+                  r.id === updated.id
+                    ? {
+                        ...r,
+                        feedbackNotes: updated.feedbackNotes,
+                        satisfactionRating: updated.satisfactionRating,
+                        complication: updated.complication,
+                        hasFeedback: Boolean(
+                          updated.feedbackNotes || updated.satisfactionRating != null || updated.complication
+                        ),
+                      }
+                    : r
+                )
+              )
+            }
+            void load(false)
           }}
         />
       )}
