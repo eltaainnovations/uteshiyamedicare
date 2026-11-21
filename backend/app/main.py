@@ -49,6 +49,7 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(users_router)
 app.include_router(products_router)
+app.include_router(end_user_records_router, prefix="/distributors")
 app.include_router(distributors_router)
 app.include_router(end_user_records_router)
 app.include_router(orders_router)
