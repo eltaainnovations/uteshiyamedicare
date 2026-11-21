@@ -772,6 +772,7 @@ export async function fetchEndUserRecords(
   const query = new URLSearchParams()
   if (params.search) query.set('search', params.search)
   if (params.rating && params.rating !== 'all') query.set('rating', params.rating)
+  query.set('_t', String(Date.now()))
   const qs = query.toString()
 
   const body = await request<{
@@ -783,7 +784,13 @@ export async function fetchEndUserRecords(
       avg_satisfaction: number | null
       complication_alerts: number
     }
-  }>(`/portal/end-user-records${qs ? `?${qs}` : ''}`)
+  }>(`/portal/end-user-records${qs ? `?${qs}` : ''}`, {
+    cache: 'no-store',
+    headers: {
+      'Cache-Control': 'no-cache',
+      Pragma: 'no-cache',
+    },
+  })
 
   return {
     items: body.items.map(mapRecord),

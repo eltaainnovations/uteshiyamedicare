@@ -58,15 +58,37 @@ export async function fetchAdminEndUserRecords(params?: {
   if (params?.search) q.set('search', params.search.trim())
   if (params?.customerId && params.customerId !== 'all') q.set('customer_id', params.customerId)
   if (params?.rating && params.rating !== 'all') q.set('rating', params.rating)
+  q.set('_t', String(Date.now()))
 
   const queryStr = q.toString() ? `?${q.toString()}` : ''
-  const res = await fetch(`${API_URL}/end-user-records${queryStr}`, {
-    headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
+  const reqHeaders: HeadersInit = {
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    'Cache-Control': 'no-cache',
+    Pragma: 'no-cache',
+  }
+
+  let res = await fetch(`${API_URL}/end-user-records${queryStr}`, {
+    cache: 'no-store',
+    headers: reqHeaders,
   })
 
-  if (!res.ok) {
+  // If intercepted by SPA fallback returning text/html, fallback to /distributors/end-user-records
+  const contentType = res.headers.get('content-type') || ''
+  if (!res.ok || contentType.includes('text/html')) {
+    try {
+      const fallbackRes = await fetch(`${API_URL}/distributors/end-user-records${queryStr}`, {
+        cache: 'no-store',
+        headers: reqHeaders,
+      })
+      if (fallbackRes.ok && !(fallbackRes.headers.get('content-type') || '').includes('text/html')) {
+        res = fallbackRes
+      }
+    } catch {
+      /* keep original res */
+    }
+  }
+
+  if (!res.ok || (res.headers.get('content-type') || '').includes('text/html')) {
     let errMessage = 'Could not load end user records.'
     try {
       const errBody = await res.json()
@@ -74,7 +96,7 @@ export async function fetchAdminEndUserRecords(params?: {
     } catch {
       /* ignore */
     }
-    throw new ApiError(res.status, errMessage)
+    throw new ApiError(res.status || 500, errMessage)
   }
 
   const data: AdminEndUserRecordListResponseBody = await res.json()
